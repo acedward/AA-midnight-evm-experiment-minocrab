@@ -1,0 +1,94 @@
+# The MinoCrab port of the AA Manager contract — workspace root.
+#
+# Two members:
+#   * `manager-port` — the Rust-eDSL transcription of `contracts/manager.compact`'s nine provable
+#     circuits, plus its differential test suite and the `emit-zkir` binary.
+#   * `prove-bench`  — a compiler-neutral keygen/prove/verify harness that loads a raw `.zkir`
+#     and its keys through Midnight's OWN crates, so neither compiler's tooling is on the
+#     timing path.
+#
+# Every dependency is pinned. `minocrab` is taken as a GIT dependency at the exact rev the
+# published measurements were made with; the `midnight-*` crates are pinned to the same
+# `midnight-ledger` rev `minocrab` itself pins, because the port must link the same upstream
+# code the reference was validated against.
+#
+# Build with the pinned toolchain:
+#
+#     cargo +1.95.0 build --release
+#
+# rustc 1.92 and below is BELOW minocrab's floor (`sysinfo@0.39.6` requires 1.95).
+
+[workspace]
+resolver = "2"
+members = ["manager-port", "prove-bench"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+# --- MinoCrab: the third-party Rust eDSL compiler this port is written against ----------------
+#
+# PINNED REV. `6a53f2b54850955406cd0f45dd78cc1e152182c7` is the exact commit every number in the
+# README was measured with. Do not float this to a branch: minocrab is pre-1.0 and an instruction
+# selection change moves the row count, which is the whole point of the measurement.
+minocrab = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
+minocrab-std = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
+minocrab-ledger = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
+minocrab-zkir = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
+minocrab-ir = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
+minocrab-sim = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
+minocrab-abi = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
+
+# --- Midnight's own crates ---------------------------------------------------------------------
+#
+# The differential harness drives Midnight's reference VM, FAB encoder and `ProofPreimage`
+# directly; `prove-bench` drives `Zkir::prove`/`verify`. Pinned to the SAME rev as minocrab's
+# `Cargo.toml` — they must match, or the harness would compare the port against a different VM
+# than minocrab was validated against.
+midnight-transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-onchain-vm = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-onchain-state = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-storage = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-zkir-v3 = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-onchain-runtime = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-coin-structure = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-curves = "0.3.1"
+
+# --- off-circuit helpers -----------------------------------------------------------------------
+group = "0.13"
+rand = "0.8"
+futures-executor = "0.3"
+sha2 = "0.11"
+sha3 = "0.11"
+serde_json = "1"
+
+# MUST mirror `sig-net/minocrab`'s own `[patch.crates-io]` verbatim.
+#
+# `[patch]` is honoured only from the ROOT of the workspace being built, and is NOT inherited
+# through a path or git dependency — so without this block the workspace fails to resolve:
+#
+#   error: failed to select a version for the requirement `midnight-transient-crypto = "^2.2.0"`
+#   candidate versions found which didn't match: 2.1.0, 2.0.1, 2.0.0
+#
+# because `midnight-zkir` depends on a `transient-crypto` ^2.2.0 that was never published to
+# crates.io. minocrab mirrors midnight-ledger's own workspace patches; this mirrors minocrab's.
+# Keeping these byte-identical to the pinned reference's is what guarantees the port links the
+# SAME midnight-* code the reference was validated against — if the pin is ever moved, this block
+# must be re-copied from that rev's root `Cargo.toml`.
+[patch.crates-io]
+midnight-transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1" }
+midnight-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+midnight-base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "04c9c5d9bcebb8d4427d8589fb54d58a55599c14" }
+
+# Mirrors minocrab's own workspace profile: dependencies carry the field arithmetic and are
+# optimized once; our own crates stay unoptimized for fast incremental rebuilds. Without this the
+# differential harness (which runs the reference VM) is unusably slow under `cargo test`.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 3

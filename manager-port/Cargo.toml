@@ -1,0 +1,68 @@
+[package]
+name = "manager-port"
+description = "contracts/manager.compact's nine provable circuits, ported to the MinoCrab Rust eDSL"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+# The three differential test targets below compare this port's emitted ZKIR against the
+# `compactc`-emitted baseline artifact for the SAME contract. That baseline is not in this repo
+# (it is a compiled file), and the pinned compactc image is not publicly rebuildable, so those
+# targets are OFF by default and only build with this feature on. See README § "Running the
+# differential suite".
+compactc-baseline = []
+
+[dependencies]
+minocrab.workspace = true
+minocrab-std.workspace = true
+minocrab-ledger.workspace = true
+minocrab-zkir.workspace = true
+
+[dev-dependencies]
+minocrab-sim.workspace = true
+minocrab-zkir.workspace = true
+minocrab-ir.workspace = true
+minocrab-abi.workspace = true
+# The differential harness drives Midnight's own reference VM and FAB encoder, exactly as
+# minocrab's porting kit does, so it needs the same upstream crates the reference pins.
+midnight-onchain-vm.workspace = true
+midnight-onchain-state.workspace = true
+midnight-base-crypto.workspace = true
+midnight-transient-crypto.workspace = true
+midnight-storage.workspace = true
+midnight-zkir-v3.workspace = true
+midnight-onchain-runtime.workspace = true
+midnight-coin-structure.workspace = true
+midnight-curves.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "emit-zkir"
+path = "src/bin/emit_zkir.rs"
+
+# --- test targets -------------------------------------------------------------------------------
+#
+# `eip712_fixtures` runs against the vendored fixture set in `fixtures/eip712/v1.json` and needs
+# nothing else — it is the suite a fresh clone can run out of the box.
+[[test]]
+name = "eip712_fixtures"
+path = "tests/eip712_fixtures.rs"
+
+# The three below need the compactc baseline ZKIRs; see the `compactc-baseline` feature above.
+[[test]]
+name = "differential"
+path = "tests/differential.rs"
+required-features = ["compactc-baseline"]
+
+[[test]]
+name = "execute_differential"
+path = "tests/execute_differential.rs"
+required-features = ["compactc-baseline"]
+
+[[test]]
+name = "phase4_differential"
+path = "tests/phase4_differential.rs"
+required-features = ["compactc-baseline"]

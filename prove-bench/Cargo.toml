@@ -1,0 +1,28 @@
+# The standalone keygen/prove/verify benchmark harness.
+#
+# It depends on MIDNIGHT'S OWN upstream crates only: no minocrab, no `manager-port`. That is
+# deliberate — the harness must load, check and prove BOTH artifacts (the compactc-emitted one and
+# the minocrab-emitted one) through the SAME code path, so neither compiler's own tooling can be on
+# the timing path.
+#
+# Build (from the workspace root, target dir kept inside the repo and gitignored):
+#   CARGO_TARGET_DIR=$PWD/target cargo +1.95.0 build --release -p prove-bench
+[package]
+name = "prove-bench"
+description = "compiler-neutral prove/verify benchmark for a raw Midnight ZKIR artifact"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+midnight-zkir-v3.workspace = true
+midnight-transient-crypto.workspace = true
+midnight-base-crypto.workspace = true
+midnight-serialize.workspace = true
+midnight-curves.workspace = true
+group.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+rand.workspace = true
+futures-executor.workspace = true
+serde_json.workspace = true

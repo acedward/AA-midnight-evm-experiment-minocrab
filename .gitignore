@@ -1,0 +1,25 @@
+# Compiled files are NOT committed to this repository. Their expected hashes are in the README,
+# so anything you regenerate is checkable against what was measured.
+
+# cargo
+target/
+**/target/
+
+# script output: ZKIRs, staged IR, keys, baselines
+generated/
+generated-*/
+
+# structured reference parameters (the Midnight SRS — hundreds of MiB)
+zk-params/
+bls_midnight_2p*
+
+# key material and IR artifacts, wherever they land
+*.prover
+*.verifier
+*.zkir
+*.bzkir
+
+# proofs and measurement scratch
+*.proof
+
+.DS_Store
