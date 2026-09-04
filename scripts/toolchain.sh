@@ -68,6 +68,35 @@ ZKIR_V3_SHA256_EXPECTED="6a91308419d24bc0633210897d10c7c1b2193444e8bde09ce763e95
 
 toolchain_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# THE ARCHIVE ITSELF, for callers that do not want an image. `scripts/release-artifacts.sh` and
+# `.github/workflows/release.yml` run `zkir-v3` NATIVELY on an arm64 Linux runner — the pinned
+# asset is `aarch64-unknown-linux-musl` and is a STATIC ELF executable, so it runs on a glibc host
+# with no image at all. They still need the same URL and the same SHA-256 the Dockerfile verifies,
+# and a second copy of a pin is a pin that will one day disagree with itself, so both are READ OUT
+# OF the Dockerfile rather than repeated here. The Dockerfile stays the pin of record.
+COMPACTC_ARCHIVE_URL="$(sed -n 's/^ARG COMPACTC_URL=//p' "$toolchain_repo_root/docker/compactc.Dockerfile")"
+COMPACTC_ARCHIVE_SHA256="$(sed -n 's/^ARG COMPACTC_SHA256=//p' "$toolchain_repo_root/docker/compactc.Dockerfile")"
+
+# Verify a `zkir-v3` obtained ANY way — unpacked from the archive on a runner, copied out of the
+# image, or already on `$PATH` — against the pin above. Keys are only as identifiable as the binary
+# that made them, so this is the native path's equivalent of `ensure_image`'s hash checks, and a
+# mismatch is the same hard exit 70 rather than a warning.
+# usage: verify_zkir_v3 <path-to-zkir-v3>   (prints the observed hash, sets $TOOLCHAIN_ZKIR_V3_SHA256)
+verify_zkir_v3() {
+  local path="$1" sha
+  test -x "$path" || { echo "not an executable zkir-v3: $path" >&2; exit 70; }
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha="$(sha256sum "$path" | cut -d ' ' -f 1)"
+  else
+    sha="$(shasum -a 256 "$path" | cut -d ' ' -f 1)"
+  fi
+  echo "ZKIR_V3_PATH=$path"
+  echo "ZKIR_V3_SHA256=$sha"
+  [ "$sha" = "$ZKIR_V3_SHA256_EXPECTED" ] \
+    || { echo "pinned toolchain mismatch: zkir-v3 $sha, expected $ZKIR_V3_SHA256_EXPECTED" >&2; exit 70; }
+  TOOLCHAIN_ZKIR_V3_SHA256="$sha"
+}
+
 ensure_image() {
   if ! docker image inspect "$COMPACTC_IMAGE" >/dev/null 2>&1; then
     if [ -n "$COMPACTC_PUBLISHED_IMAGE" ]; then

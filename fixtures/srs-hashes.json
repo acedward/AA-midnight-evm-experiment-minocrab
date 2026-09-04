@@ -1,0 +1,43 @@
+{
+  "note": "The Midnight structured reference string (SRS) payloads `zkir-v3 compile` needs, one per distinct `k` among the port's nine provable circuits, pinned by SIZE and SHA-256. These files are NOT in this repository (they are hundreds of MiB in aggregate and are gitignored); `scripts/release-artifacts.sh` obtains them from the source below and refuses to key anything if a digest does not match. The SRS is what makes a key pair reproducible: the same ZKIR keyed against a different SRS is a different key, so this record is as load-bearing as `port-artifact-hashes.json`. The digests are the release's own, read with `gh release view 0.3.120 --repo effectstream/binaries --json assets`.",
+  "recordedAt": "2026-09-04",
+  "source": {
+    "repo": "effectstream/binaries",
+    "release": "0.3.120",
+    "releaseUrl": "https://github.com/effectstream/binaries/releases/tag/0.3.120",
+    "downloadUrl": "https://github.com/effectstream/binaries/releases/download/0.3.120/{name}",
+    "note": "The release publishes bls_midnight_2p0 … bls_midnight_2p19; only the five below are needed here. `bls_midnight_2p18` is the same file, byte for byte, that the README's `execute` key pair was generated against."
+  },
+  "params": {
+    "bls_midnight_2p8": {
+      "k": 8,
+      "bytes": 49540,
+      "sha256": "909b707551eaaea79828e883cde6fc46ab15986c3b1d791bed462c9e2805c933",
+      "circuits": ["isRegistered", "poolHasColour", "poolValue"]
+    },
+    "bls_midnight_2p9": {
+      "k": 9,
+      "bytes": 98692,
+      "sha256": "b9009f1098bcefffec3c461ab3a5e3a17f7e5599f0f08c70fcdc55a89227bcbd",
+      "circuits": ["accountRecord"]
+    },
+    "bls_midnight_2p13": {
+      "k": 13,
+      "bytes": 1573252,
+      "sha256": "d3324910969c4cc54143b8045b649e5c3a4bd5fb7b8f85fe1b770f640ce1c803",
+      "circuits": ["depositUnshielded", "shieldedAccountBalance", "unshieldedAccountBalance"]
+    },
+    "bls_midnight_2p16": {
+      "k": 16,
+      "bytes": 12583300,
+      "sha256": "09c877216d6589b370263e18af40a030a901b41a7a7c37ef58c9901db41f05c6",
+      "circuits": ["depositShielded"]
+    },
+    "bls_midnight_2p18": {
+      "k": 18,
+      "bytes": 50332036,
+      "sha256": "e8436dc5d8b598f169c127c745135d889744007e6d384ff126df8d1332522f86",
+      "circuits": ["execute"]
+    }
+  }
+}
