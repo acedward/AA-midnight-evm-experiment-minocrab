@@ -4,13 +4,17 @@
 # MEASUREMENT-ONLY. `--skip-zk` never generates a prover or verifier key.
 #
 # This produces the BASELINE ARTIFACT the differential suite compares the port against. It is not
-# shipped in this repository (it is a compiled file); you need your own compactc image to make it.
-# See README § "Running the differential suite".
+# shipped in this repository (it is a compiled file) — this script makes it, and as of 2026-09-04 it
+# makes it on any arm64 host with a network and nothing else: the toolchain is obtained and verified
+# by `scripts/toolchain.sh`, which builds `docker/compactc.Dockerfile` from a SHA-256-pinned release
+# archive when no image is present. See README § "Running the differential suite".
 #
-#   COMPACTC_IMAGE   docker image (or image@sha256:…) providing `compactc`. Defaults to the exact
-#                    locally-built image every published number was measured with:
-#                    Compact 0.33.0 / language 0.25.0 / --feature-zkir-v3. That image is NOT
-#                    publicly pullable — set this variable to your own.
+#   COMPACTC_IMAGE   OPTIONAL override. Defaults to the pinned toolchain `aa-compactc:0.34.0`
+#                    (compiler 0.34.0 / language 0.26.0 / --feature-zkir-v3), obtained and
+#                    hash-verified by scripts/toolchain.sh. Point it at another build only to
+#                    re-derive an artifact from a superseded compiler; the version and both binary
+#                    hashes are still checked, so a mismatched image is a hard failure, not a
+#                    silent re-baseline.
 #
 # usage: compile-baseline.sh <arm-name> <path-to-contract.compact> <confirmed-free-marker-port>
 #
@@ -29,7 +33,14 @@ src="$2"
 marker_port="$3"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-image="${COMPACTC_IMAGE:-aa00006-compactc@sha256:f57ca2d88cec1c66f377eb8bb2d616779202dd1ccb99517a4f7ddfffa9d0d86b}"
+
+# The pinned Compact toolchain — ONE source of truth for this script, measure-zkir.sh and
+# keygen-zkir.sh. `ensure_image` (called below, in the header block, so its output lands in the log)
+# obtains the image and verifies the compiler version, the language version and the SHA-256 of both
+# compiler binaries before a single byte is compiled.
+# shellcheck source=scripts/toolchain.sh
+. "$repo_root/scripts/toolchain.sh"
+
 out_dir="$repo_root/generated/$arm"
 container="minocrab-port-compile-${arm}"
 timeout_seconds=900
@@ -64,7 +75,8 @@ echo "SOURCE=$src"
 echo "SOURCE_SHA256=$(shasum -a 256 "$src" | cut -d ' ' -f 1)"
 echo "MARKER_PORT=$marker_port"
 echo "BOUNDS=cpus:2,memory:8g,memory-swap:8g,rayon:2,wall-seconds:$timeout_seconds,network:none"
-echo "IMAGE=$image"
+ensure_image
+image="$COMPACTC_IMAGE"
 
 # The watchdog must NOT inherit this script's stdout/stderr: a background writer keeps a
 # consuming pipe open for its whole sleep, which would stall any caller reading our output.

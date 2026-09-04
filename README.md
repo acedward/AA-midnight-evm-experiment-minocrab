@@ -39,8 +39,12 @@ manager-port/          the port: one module per circuit family, plus the differe
   tests/                 the equivalence gate (see below)
 prove-bench/           compiler-neutral keygen/prove/verify harness — links NO minocrab code, so
                        neither compiler's tooling is ever on the timing path
-scripts/               compile (compactc baseline) · measure (k, rows) · keygen · helpers
+scripts/               toolchain (the compactc pin) · compile (compactc baseline) · measure
+                       (k, rows) · keygen · check-port-artifacts (the emitted-ZKIR gate) · helpers
+docker/                compactc.Dockerfile — the pinned toolchain, built from a SHA-256-pinned
+                       release archive, so the reference side needs no private image
 fixtures/eip712/       the frozen EIP-712 test-vector set (see § Vendored fixtures)
+fixtures/port-artifact-hashes.json   the expected-hash table below, in machine form
 ```
 
 ## Pins
@@ -52,10 +56,26 @@ Every number below was measured at exactly these pins. They are not suggestions.
 | **MinoCrab** | [`sig-net/minocrab`][minocrab] @ `6a53f2b54850955406cd0f45dd78cc1e152182c7` — **unaudited third party** |
 | **Rust** | `cargo` / `rustc` **1.95.0** (`aarch64-apple-darwin`). 1.92 and below are *below* minocrab's floor — `sysinfo@0.39.6` requires 1.95 |
 | **Contract ported** | [`contracts/manager.compact`][contract] @ [`713a20215f33e02904ea5bd699b7de7f76562e1b`][pin] — 1,420 lines, 78,004 B, sha256 `164cf112dc52ba88f1e16cfbd1e63c3bc6b2831539be12e7de229847dd7025c7` |
-| **Reference compiler** | **Compact 0.33.0** / language 0.25.0 / `--feature-zkir-v3` (image id `sha256:f57ca2d88cec1c66f377eb8bb2d616779202dd1ccb99517a4f7ddfffa9d0d86b`) |
-| **Keygen tool** | `zkir-v3 compile`, i.e. `midnight-zkir-v3` **3.0.0-rc.2**, from that same image |
+| **Reference compiler** | **Compact 0.34.0** / language 0.26.0 / runtime 0.19.0 / `--feature-zkir-v3`, the toolchain the product repository pins on `main`. Obtained and hash-verified by `scripts/toolchain.sh`, which builds `docker/compactc.Dockerfile` from release archive `compactc_v0.34.0_aarch64-unknown-linux-musl.zip` (sha256 `d3e292c4f48e257dcd6b3d3e3e4743d7d8ea0729f48953eab91a366d44cd026d`) — arm64. The verified binaries are `compactc.bin` `628b343f9b0ebe32e6e6a141b6f73cc66edb19c516a4817b478c3b47f74230d5` and `zkir-v3` `6a91308419d24bc0633210897d10c7c1b2193444e8bde09ce763e9556cb8f93a`. See the history note below |
+| **Keygen tool** | `zkir-v3 compile` (`/opt/compactc/zkir-v3`), from that same image |
 | **Upstream ledger crates** | `midnightntwrk/midnight-ledger` rev `04c9c5d9bcebb8d4427d8589fb54d58a55599c14`; `midnight-transient-crypto` tag `transient-crypto-2.2.0-rc.1` |
 | **SRS used for keygen** | `bls_midnight_2p18`, 50,332,036 B, sha256 `e8436dc5d8b598f169c127c745135d889744007e6d384ff126df8d1332522f86` |
+
+**Toolchain history.** Every number in this README up to 2026-09-04 was measured with a compiler
+**0.33.0** / language 0.25.0 image (id `sha256:f57ca2d88cec1c66f377eb8bb2d616779202dd1ccb99517a4f7ddfffa9d0d86b`)
+that was built locally and is not publicly pullable, and the scripts defaulted to it by digest — so
+a fresh clone could not produce the reference side at all. The pin is now the release ARCHIVE, not
+an image, and the 0.34.0 move re-derived every affected number rather than assuming it:
+
+* the compactc baseline compiled on 0.34.0 from the same contract source is **byte-identical** to
+  the recorded 0.33.0 baseline, all nine circuits; and
+* this image's `zkir-v3` (`6a913084…`) reports the **same (k, rows)** and writes a **byte-identical
+  `.bzkir`** for every one of the port's nine ZKIRs as the 0.33.0 `zkir-v3` (`75153f47…`) did —
+  `execute` at k = 18 / 211,056 included.
+
+So the tables below stand unchanged under the new toolchain. The 0.33.0 toolchain itself is still
+reproducible — its archive and both binary hashes are recorded in `docker/compactc.Dockerfile` —
+if an older artifact ever has to be re-derived.
 
 The statement includes three fixes that landed in the product contract before this snapshot: the
 `aa:manager:*` domain-tag rename (PR #7), the `safeGive` pool-underflow clamp (PR #9) and the
@@ -166,6 +186,20 @@ cargo +1.95.0 run --release --locked -p manager-port --bin emit-zkir -- generate
 shasum -a 256 generated/port-zkir/*.zkir
 ```
 
+Or let the gate do both, against the machine-readable copy of the table below:
+
+```bash
+scripts/check-port-artifacts.sh          # re-emits into a temp dir and compares every size + hash
+#   -> PORT ARTIFACT GATE OK — 10 circuit(s), every size and hash identical
+```
+
+It needs no compactc, no Docker, no SRS and no network — emission is deterministic and the hashes
+are decided by the pinned `minocrab` rev and this crate's source, nothing else. Pass
+`--no-toolchain-check` to skip even the (purely informational) toolchain probe. The record it
+compares against is `fixtures/port-artifact-hashes.json`, which also carries the `minocrab` rev,
+the contract pin and the toolchain provenance; `--write` re-records it, and is only ever run for an
+intended byte change that the commit message explains.
+
 ### Expected hashes
 
 `execute` — the circuit the whole comparison is about:
@@ -200,22 +234,26 @@ moved pin — a different minocrab rev, or a different `midnight-ledger` rev pul
 
 ### Measuring (k, rows) and generating keys
 
-Both need a `compactc` 0.33.0 image, because both drive the `zkir-v3` binary that ships inside it.
-The image these numbers came from was built locally and is **not publicly pullable**; point
-`COMPACTC_IMAGE` at your own.
+Both need the pinned Compact toolchain, because both drive the `zkir-v3` binary that ships inside
+it. `scripts/toolchain.sh` obtains it for you — from a local image, or by building
+`docker/compactc.Dockerfile` from the SHA-256-pinned release archive — and verifies the compiler
+version, the language version and both binary hashes before anything runs. No `COMPACTC_IMAGE` to
+set, no private image to find.
 
 ```bash
 # (k, rows) via `zkir-v3 mock-compile` — also writes the .bzkir hashed above
-COMPACTC_IMAGE=<your-compactc-0.33.0-image> \
-  scripts/measure-zkir.sh generated/port-zkir execute $(scripts/free-port.sh) 1800 port
+scripts/measure-zkir.sh generated/port-zkir execute $(scripts/free-port.sh) 1800 port
 #   -> Mock compiling circuit "execute.zkir" (k=18, rows=211056)
 
 # proving + verifying keys, offline, from the raw ZKIR
 #   put the SRS in generated/zk-params/ first — the container runs --network none and
 #   cannot fetch it
-COMPACTC_IMAGE=<your-compactc-0.33.0-image> \
-  scripts/keygen-zkir.sh port-execute generated/port-zkir/execute.zkir $(scripts/free-port.sh)
+scripts/keygen-zkir.sh port-execute generated/port-zkir/execute.zkir $(scripts/free-port.sh)
 ```
+
+Set `COMPACTC_IMAGE=<ref>` only to drive a *different* build of the toolchain — to re-derive a
+0.33.0-era artifact, say. The version and both binary hashes are still checked, so a mismatched
+image exits 70 instead of silently re-baselining.
 
 `keygen-zkir.sh` runs `zkir-v3 compile` rather than `compactc` deliberately: a MinoCrab artifact has
 no `.compact` source at all, so keying it from the raw ZKIR is the only route — and it means both
@@ -247,11 +285,9 @@ gives them accepted runs.
 
 The equivalence gate compares this port's emitted ZKIR against the **`compactc`-emitted artifact for
 the same contract commit**, circuit by circuit and run by run. That baseline is a compiled file and
-is not in this repository, and the pinned compactc image is not publicly rebuildable — so the three
-differential targets are behind a cargo feature and are not even compiled by a default
-`cargo test`.
-
-To run them you need a compactc **0.33.0** (language 0.25.0, `--feature-zkir-v3`) image of your own:
+is not in this repository — you build it — so the three differential targets are behind a cargo
+feature and are not even compiled by a default `cargo test`. What you need is Docker and a network
+for step 2; the toolchain builds itself from the pinned archive.
 
 ```bash
 # 1. get the contract at the pinned commit
@@ -260,8 +296,9 @@ git -C AA-midnight-evm-experiment-v3 checkout 713a20215f33e02904ea5bd699b7de7f76
 shasum -a 256 AA-midnight-evm-experiment-v3/contracts/manager.compact
 #   -> 164cf112dc52ba88f1e16cfbd1e63c3bc6b2831539be12e7de229847dd7025c7
 
-# 2. compile the baseline (--skip-zk: no keys are generated)
-COMPACTC_IMAGE=<your-compactc-0.33.0-image> scripts/compile-baseline.sh baseline \
+# 2. compile the baseline (--skip-zk: no keys are generated). scripts/toolchain.sh obtains and
+#    verifies compactc 0.34.0 on the way in; the compile itself runs --network none.
+scripts/compile-baseline.sh baseline \
   AA-midnight-evm-experiment-v3/contracts/manager.compact $(scripts/free-port.sh)
 
 # 3. run the gate
@@ -274,8 +311,9 @@ point it somewhere else.
 
 **Check your baseline before you trust a red run.** A different compactc version will emit a
 different artifact, and a mismatch will then be reported against *your* baseline rather than
-against the one these results describe. The published gate ran against a baseline whose `execute`
-side measured k = 19 / 382,781 rows.
+against the one these results describe — which is why `scripts/toolchain.sh` refuses to run on a
+compiler it does not recognise. The published gate ran against a baseline whose `execute` side
+measured k = 19 / 382,781 rows, whose nine ZKIR hashes are byte-identical under 0.33.0 and 0.34.0.
 
 ## What "equivalent" was tested to mean
 

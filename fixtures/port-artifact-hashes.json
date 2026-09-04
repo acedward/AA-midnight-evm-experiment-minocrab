@@ -1,0 +1,57 @@
+{
+  "note": "The SIZE and SHA-256 of every .zkir `emit-zkir` produces, i.e. the README's expected-hash table in machine form. Compared by scripts/check-port-artifacts.sh; re-record with `--write` ONLY when a byte change is intended and the commit message says which hashes moved and why. Emission is deterministic and needs no compactc, no Docker and no network: the hashes are decided by the `minocrab` rev below and by this crate's source, nothing else.",
+  "recordedAt": "2026-09-04",
+  "minocrabRev": "6a53f2b54850955406cd0f45dd78cc1e152182c7",
+  "contractPin": {
+    "commit": "713a20215f33e02904ea5bd699b7de7f76562e1b",
+    "managerCompactSha256": "164cf112dc52ba88f1e16cfbd1e63c3bc6b2831539be12e7de229847dd7025c7"
+  },
+  "toolchain": {
+    "note": "Recorded for the reader, NOT load-bearing for the hashes: nothing in this repository is compiled by compactc. This is the toolchain the README's reference (compactc baseline) and key numbers were measured with.",
+    "image": "aa-compactc:0.34.0",
+    "compactcBinSha256": "628b343f9b0ebe32e6e6a141b6f73cc66edb19c516a4817b478c3b47f74230d5",
+    "zkirV3Sha256": "6a91308419d24bc0633210897d10c7c1b2193444e8bde09ce763e9556cb8f93a"
+  },
+  "circuits": {
+    "accountRecord": {
+      "bytes": 6065,
+      "sha256": "ab6a0afd75d46d3f77a2cfb998b5106004eb90cd5528393ca0d2039bda1b2d59"
+    },
+    "depositShielded": {
+      "bytes": 14847,
+      "sha256": "16b6912ef08e38abfe33757156d8be91105d11b6a369256624eef9938e36b52f"
+    },
+    "depositUnshielded": {
+      "bytes": 4333,
+      "sha256": "b228a30b533b29966de36f3c007c270cc2f910c9d8200fa25858709e1025edcb"
+    },
+    "execute": {
+      "bytes": 124071,
+      "sha256": "aed45e8031e7babc31702adc48154b563176b6395466dc71991a62372cca437f"
+    },
+    "hello_positive_amount": {
+      "bytes": 314,
+      "sha256": "be3bfc7c376b26ef5d5b848a6a0d1650636210176e3cf9c6ffe8ea23bcec91db"
+    },
+    "isRegistered": {
+      "bytes": 786,
+      "sha256": "a6da7f83589283327789ae7a91bb5585efc6e73d69ce1bf48ba568e58a5c3ae3"
+    },
+    "poolHasColour": {
+      "bytes": 792,
+      "sha256": "9a92ddc5dd5c85aea5af5d42f5f79801617ff073cd92e0cb1bec92d798497587"
+    },
+    "poolValue": {
+      "bytes": 1632,
+      "sha256": "17868ae25867ac78f159961f52c253ffbb3de8e6f289bb0632bd815d396c3699"
+    },
+    "shieldedAccountBalance": {
+      "bytes": 1768,
+      "sha256": "2311b13ee29a2101dd62682240135c351cfde4cad2f261cb6602ea28d16a2436"
+    },
+    "unshieldedAccountBalance": {
+      "bytes": 1772,
+      "sha256": "3f449ff9e79786c831cc5b61454b569426b138e8c81146deba5b633deddd8dd9"
+    }
+  }
+}
