@@ -1,0 +1,113 @@
+# CI — build the port, run its default tests, and prove it still emits the same ZKIR.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO
+#
+# No compactc, no Docker, no SRS, no proving keys, no network beyond `cargo fetch`. The gate below
+# is the *artifact identity* gate — "does this crate still emit the bytes the README publishes" —
+# and that question needs none of them: emission is deterministic and is decided by the pinned
+# `minocrab` rev and this crate's source, nothing else (`scripts/check-port-artifacts.sh`, which
+# says so at length).
+#
+# THE DIFFERENTIAL SUITE IS NOT RUN HERE, AND THAT IS ON PURPOSE. The equivalence gate
+# (`cargo test --features compactc-baseline`, 59 tests) compares this port against a `compactc`
+# artifact compiled from the product's contract at the pinned commit. That artifact is a COMPILED
+# FILE which is not in this repository and cannot be: reproducing it needs the pinned Compact
+# toolchain in Docker and a checkout of a second repository. So the differential suite stays a
+# local, feature-gated gate, documented in the README under "Running the differential suite", and
+# CI covers the two things it can cover honestly and in minutes.
+#
+# The division of labour is worth being explicit about, because a green CI badge should not be read
+# as more than it is:
+#
+#   this workflow answers   "did the emitted BYTES change, and does the crate still build and pass
+#                            its own tests?"
+#   the local suite answers "is the statement still equivalent to the contract?"
+#
+# A byte change with a green differential suite is a legitimate re-record; a byte change with no
+# explanation is a bug. CI can only ever see the first half of that sentence.
+#
+# RUST 1.95.0 IS A REAL FLOOR, not a preference: `sysinfo@0.39.6` declares `rust-version = "1.95"`
+# and arrives through `midnight-storage`, i.e. through the `midnight-ledger` rev that `minocrab`
+# pins. 1.92 and below cannot build this workspace at all.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # A cold build pulls a dozen git dependencies; a transient fetch failure should not be a red run.
+  CARGO_NET_RETRY: 3
+
+# NOT SET: `RUSTFLAGS: -D warnings`. The workspace carries six pre-existing warnings, all in
+# `prove-bench` (two needless `mut`s and four items — `pad32`, `hex_of`, `Reads::bytes20`,
+# `Scenario::what` — kept for the benchmark scenarios that do not currently use them). Turning
+# warnings into errors is a policy change with its own diff, and smuggling it into a
+# toolchain-and-structure PR would mean either a red first run or unrelated edits to a harness that
+# links no minocrab code and decides no emitted byte. Left as a follow-up.
+
+jobs:
+  build-test-and-gate:
+    name: build · test · artifact gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup default 1.95.0
+          cargo --version
+          rustc --version
+
+      # The git dependencies (minocrab and the midnight-ledger crates) dominate a cold build, so
+      # the registry, the git checkouts and `target/` are all cached, keyed on the lockfile. A
+      # dependency bump misses the cache and rebuilds, which is correct: the point of the cache is
+      # to make an UNCHANGED dependency graph cheap, not to hide a changed one.
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+            target
+          key: cargo-${{ runner.os }}-1.95.0-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-1.95.0-
+
+      # Formatting is checked before anything expensive: it takes a second and it is the failure a
+      # contributor is most likely to hit.
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # The default targets only — the three differential targets are behind the `compactc-baseline`
+      # feature and are not even compiled here, for the reason in this file's header.
+      - name: Tests
+        run: cargo test --release --locked
+
+      # THE ARTIFACT GATE. Re-emits every circuit into a temporary directory and compares each
+      # file's size and SHA-256 against `fixtures/port-artifact-hashes.json` — the README's
+      # expected-hash table in machine form. `--no-toolchain-check` skips the one step that would
+      # want Docker: the compactc toolchain probe, which is provenance for the reader and decides
+      # none of the hashes.
+      #
+      # If this fails, the first thing to suspect is the `minocrab` rev — the script prints the
+      # recorded one next to the observed one for exactly that reason.
+      - name: Artifact gate (emitted ZKIR hashes)
+        run: scripts/check-port-artifacts.sh --no-toolchain-check
