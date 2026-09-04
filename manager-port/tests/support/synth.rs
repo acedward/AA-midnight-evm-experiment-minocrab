@@ -147,10 +147,7 @@ fn parse_impact_mismatch(message: &str) -> Option<(usize, Fr)> {
         .parse()
         .ok()?;
     let computed = message.split("computed: ").nth(1)?.trim();
-    let hex = computed
-        .strip_prefix("Some(")?
-        .strip_suffix(')')?
-        .trim();
+    let hex = computed.strip_prefix("Some(")?.strip_suffix(')')?.trim();
     Some((index, fr_from_debug(hex)?))
 }
 
@@ -189,7 +186,11 @@ mod tests {
     fn fr_debug_round_trips() {
         for v in [0u64, 1, 42, 0xdead_beef, u64::MAX] {
             let f = Fr::from(v);
-            assert_eq!(fr_from_debug(&format!("{f:?}")), Some(f), "round trip of {v}");
+            assert_eq!(
+                fr_from_debug(&format!("{f:?}")),
+                Some(f),
+                "round trip of {v}"
+            );
         }
     }
 

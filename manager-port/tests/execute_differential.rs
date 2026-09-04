@@ -89,8 +89,9 @@ fn assert_schema_identity(ours: &IrSource, theirs: &IrSource) {
 
 /// Clause 2: PI-vector identity on a shared preimage.
 fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, what: &str) {
-    let their_run = simulate(theirs, pi)
-        .unwrap_or_else(|e| panic!("{what}: the compactc artifact rejected the synthesized preimage: {e}"));
+    let their_run = simulate(theirs, pi).unwrap_or_else(|e| {
+        panic!("{what}: the compactc artifact rejected the synthesized preimage: {e}")
+    });
     let our_run = simulate(ours, pi).unwrap_or_else(|e| {
         panic!(
             "{what}: THE PORT REJECTED a preimage the compactc artifact accepts.\n  {e}\n\
@@ -111,9 +112,16 @@ fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, wh
         .zip(their_run.pi_skips.iter())
         .enumerate()
     {
-        assert_eq!(a, b, "{what}: pi_skips differ at Impact {i}: port {a:?} vs compactc {b:?}");
+        assert_eq!(
+            a, b,
+            "{what}: pi_skips differ at Impact {i}: port {a:?} vs compactc {b:?}"
+        );
     }
-    assert_eq!(our_run.pis.len(), their_run.pis.len(), "{what}: PI vector lengths differ");
+    assert_eq!(
+        our_run.pis.len(),
+        their_run.pis.len(),
+        "{what}: PI vector lengths differ"
+    );
     for (i, (a, b)) in our_run.pis.iter().zip(their_run.pis.iter()).enumerate() {
         assert_eq!(a, b, "{what}: PI vectors differ at element {i}");
     }
@@ -125,7 +133,9 @@ fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, wh
         "{what}: upstream check() disagrees with the simulation on the port"
     );
     assert_eq!(
-        theirs.check(pi).expect("upstream accepts the compactc artifact"),
+        theirs
+            .check(pi)
+            .expect("upstream accepts the compactc artifact"),
         their_run.pi_skips,
         "{what}: upstream check() disagrees with the simulation on the compactc artifact"
     );
@@ -133,7 +143,12 @@ fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, wh
 
 /// Clause 3: every single-element mutation of the preimage must be judged the same way by both
 /// artifacts. Zero acceptance disagreements is the assertion.
-fn assert_tamper_agreement(ours: &IrSource, theirs: &IrSource, base: &ProofPreimage, what: &str) -> usize {
+fn assert_tamper_agreement(
+    ours: &IrSource,
+    theirs: &IrSource,
+    base: &ProofPreimage,
+    what: &str,
+) -> usize {
     let mut checked = 0usize;
     let mut disagreements = Vec::new();
 
@@ -234,7 +249,11 @@ fn a_colour() -> [u8; 32] {
 /// A signature that is well-formed but not over anything in particular — enough for the paths where
 /// the ECDSA result is never asserted on (`authMode == 0`), where the contract still runs the
 /// verification straight-line because the pinned backend cannot lower a guarded secp operation.
-fn dummy_signature() -> (minocrab_zkir::v3::IrValue, minocrab_zkir::v3::IrValue, minocrab_zkir::v3::IrValue) {
+fn dummy_signature() -> (
+    minocrab_zkir::v3::IrValue,
+    minocrab_zkir::v3::IrValue,
+    minocrab_zkir::v3::IrValue,
+) {
     sign(&[7u8; 32], &scalar(0x5eed), &scalar(0xf00d))
 }
 
@@ -252,8 +271,8 @@ fn native_registration() -> Scenario {
     // 6. `registerAccount(account, 0)`:
     reads.bool(false); //   `accounts.member(account)`      — not yet registered
     reads.bool(false); //   `accountModes.member(account)`  — no mode collision
-    // 7. `custodyDispatch` — OFF: `!isRegistration` is false.
-    // 8. `evmNonces.insert` — OFF: `isEvmAuthorized` is false.
+                       // 7. `custodyDispatch` — OFF: `!isRegistration` is false.
+                       // 8. `evmNonces.insert` — OFF: `isEvmAuthorized` is false.
     Scenario {
         name: "selector 0 — native registration",
         payload: Payload {
@@ -337,8 +356,8 @@ fn withdraw_unshielded_native() -> Scenario {
     reads.bool(true); //   `unshieldedBalances.member(debitKey)` — the muxed family is unshielded
     reads.u128(1_000); //  `unshieldedBalances.lookup(debitKey)`
     reads.bool(false); //  `unshieldedBalance(col) < val` — the contract holds enough
-    //  `is_self` reads nothing: after PR#10 `recipientKind == 0` is the UserAddress (RIGHT) arm,
-    //  so `is_left` is 0 and the auto-receive `kernel.self()` read is guarded off.
+                       //  `is_self` reads nothing: after PR#10 `recipientKind == 0` is the UserAddress (RIGHT) arm,
+                       //  so `is_left` is 0 and the auto-receive `kernel.self()` read is guarded off.
     Scenario {
         name: "selector 3 — withdraw unshielded, native",
         payload: Payload {
@@ -672,7 +691,10 @@ fn pr10_envelope_refuses_the_contract_recipient_shapes() {
     for sc in [withdraw, swap] {
         let (partial, err) = support::synth::synthesize_partial(&theirs, &sc.preimage());
         let err = err.unwrap_or_else(|| {
-            panic!("{}: the compactc artifact ACCEPTED a shape PR#10 forbids", sc.name)
+            panic!(
+                "{}: the compactc artifact ACCEPTED a shape PR#10 forbids",
+                sc.name
+            )
         });
         assert!(
             err.contains("(assert): failed direct assertion"),
@@ -712,7 +734,11 @@ fn signer_address() -> [u8; 20] {
 /// Sign the EIP-712 digest this payload commits to under `manager` / `domain`.
 fn sign_payload(
     payload: &Payload,
-) -> (minocrab_zkir::v3::IrValue, minocrab_zkir::v3::IrValue, minocrab_zkir::v3::IrValue) {
+) -> (
+    minocrab_zkir::v3::IrValue,
+    minocrab_zkir::v3::IrValue,
+    minocrab_zkir::v3::IrValue,
+) {
     let manager = self_addr();
     let sep = domain_separator(&manager, &deployment_domain());
     let digest = eip712_digest(&sep, &payload.struct_hash(&manager));
@@ -956,7 +982,7 @@ fn withdraw_shielded_emptying_the_pool() -> Scenario {
     reads.bool(true);
     reads.coin(&[9u8; 32], &a_colour(), 100, 0); // pooled value == primaryAmount
     reads.b32(&self_addr()); // `sendShielded`'s `kernel.self()`
-    //  no `insertCoin` read: the change is zero, so the colour leaves the map instead.
+                             //  no `insertCoin` read: the change is zero, so the colour leaves the map instead.
     Scenario {
         name: "selector 2 — withdraw shielded, pool emptied (removal arm)",
         payload: Payload {
@@ -1029,8 +1055,12 @@ fn replay_accepted(
     let pi = synthesize(&theirs, &scenario.preimage())
         .unwrap_or_else(|e| panic!("{}: {e}", scenario.name));
 
-    let ops = replay::decode_ops(&pi.public_transcript_inputs)
-        .unwrap_or_else(|e| panic!("{}: the transcript is not a well-formed op stream: {e}", scenario.name));
+    let ops = replay::decode_ops(&pi.public_transcript_inputs).unwrap_or_else(|e| {
+        panic!(
+            "{}: the transcript is not a well-formed op stream: {e}",
+            scenario.name
+        )
+    });
     replay::assert_round_trip(&ops, &pi.public_transcript_inputs);
 
     let executed = replay::run(pre, &self_addr(), block_time_secs, &ops).unwrap_or_else(|e| {
@@ -1226,7 +1256,10 @@ fn replay_withdraw_unshielded_native() {
         seen.push((key.into_inner().1, amount));
     }
     let (addr, amount) = seen.pop().expect("one claimed spend");
-    assert_eq!(amount, 100, "the claimed amount must be the withdrawn amount");
+    assert_eq!(
+        amount, 100,
+        "the claimed amount must be the withdrawn amount"
+    );
     assert_eq!(
         addr,
         PublicAddress::User(UserAddress(midnight_base_crypto::hash::HashOutput(

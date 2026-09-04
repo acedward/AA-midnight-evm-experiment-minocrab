@@ -22,8 +22,8 @@ pub mod coins;
 pub mod custody;
 pub mod deposits;
 pub mod eip712;
-pub mod execute;
 pub mod envelope;
+pub mod execute;
 pub mod guards;
 pub mod hello;
 pub mod ledger;
@@ -38,14 +38,20 @@ pub mod words;
 /// `minocrab-contracts/tests/support::circuits()`.
 pub fn circuits() -> Vec<(&'static str, fn() -> Compiled3)> {
     vec![
-        ("hello_positive_amount", hello::positive_amount as fn() -> Compiled3),
+        (
+            "hello_positive_amount",
+            hello::positive_amount as fn() -> Compiled3,
+        ),
         // Phase 2 probe. The name is the compactc circuit name, so the emitted
         // `<name>.zkir` sits next to the baseline artifact of the same name.
         ("isRegistered", queries::is_registered as fn() -> Compiled3),
         // Phase 3 — the headline circuit.
         ("execute", execute::execute as fn() -> Compiled3),
         // Phase 4 — the rest of the nine-ZKIR provable surface.
-        ("poolHasColour", queries::pool_has_colour as fn() -> Compiled3),
+        (
+            "poolHasColour",
+            queries::pool_has_colour as fn() -> Compiled3,
+        ),
         ("poolValue", queries::pool_value as fn() -> Compiled3),
         (
             "shieldedAccountBalance",
@@ -55,7 +61,10 @@ pub fn circuits() -> Vec<(&'static str, fn() -> Compiled3)> {
             "unshieldedAccountBalance",
             queries::unshielded_account_balance as fn() -> Compiled3,
         ),
-        ("accountRecord", queries::account_record as fn() -> Compiled3),
+        (
+            "accountRecord",
+            queries::account_record as fn() -> Compiled3,
+        ),
         (
             "depositUnshielded",
             deposits::deposit_unshielded as fn() -> Compiled3,

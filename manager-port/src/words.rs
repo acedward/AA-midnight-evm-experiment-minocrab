@@ -55,7 +55,10 @@ pub fn reverse_bytes32<V: Vis3>(c: &mut Circuit3, b: &B32<V>) -> B32<V> {
 /// type is what guarantees the bound (`Uint<64>` *is* `assert_bits(w, 64)`).
 pub fn numeric_word<V: Vis3>(c: &mut Circuit3, value: Wire3<FieldT, V>) -> B32<V> {
     let zero = V::from_public(c.constant(0u64));
-    let padded = B32 { hi: zero, lo: value };
+    let padded = B32 {
+        hi: zero,
+        lo: value,
+    };
     reverse_bytes32(c, &padded)
 }
 

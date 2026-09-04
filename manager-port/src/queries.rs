@@ -216,12 +216,7 @@ impl CircuitOut for AccountRecordOut {
 }
 
 impl Select<Public> for AccountRecordOut {
-    fn select(
-        c: &mut Circuit3,
-        bit: Wire3<FieldT, Public>,
-        taken: Self,
-        fallback: Self,
-    ) -> Self {
+    fn select(c: &mut Circuit3, bit: Wire3<FieldT, Public>, taken: Self, fallback: Self) -> Self {
         AccountRecordOut {
             registered: Select::select(c, bit, taken.registered, fallback.registered),
             mode: Select::select(c, bit, taken.mode, fallback.mode),

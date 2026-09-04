@@ -69,7 +69,9 @@ fn fr_to_i64(f: Fr) -> Option<i64> {
         return i64::try_from(v).ok();
     }
     let neg = Fr::from(0u64) - f;
-    fr_to_u64(neg).and_then(|v| i64::try_from(v).ok()).map(|v| -v)
+    fr_to_u64(neg)
+        .and_then(|v| i64::try_from(v).ok())
+        .map(|v| -v)
 }
 
 // ---- the decoder ---------------------------------------------------------------------------------
@@ -170,7 +172,9 @@ fn read_state_value(cur: &mut Cursor) -> Result<StateValue, String> {
             }
             Ok(StateValue::Array(Array::from(elems)))
         }
-        other => Err(format!("element {at}: unsupported StateValue tag {other:#x}")),
+        other => Err(format!(
+            "element {at}: unsupported StateValue tag {other:#x}"
+        )),
     }
 }
 
@@ -191,7 +195,10 @@ fn read_key(cur: &mut Cursor) -> Result<Key, String> {
 /// `verify.rs:1889-1894` accepts — a transcript still holding two adjacent `Noop`s is
 /// `MalformedTransaction::NotNormalized`.
 pub fn decode_ops(transcript: &[Fr]) -> Result<Vec<VmOp>, String> {
-    let mut cur = Cursor { fr: transcript, at: 0 };
+    let mut cur = Cursor {
+        fr: transcript,
+        at: 0,
+    };
     let mut ops: Vec<VmOp> = Vec::new();
     while !cur.done() {
         let at = cur.at;
@@ -294,7 +301,10 @@ pub fn assert_round_trip(ops: &[VmOp], transcript: &[Fr]) {
         transcript.len()
     );
     for (i, (a, b)) in out.iter().zip(transcript.iter()).enumerate() {
-        assert_eq!(a, b, "the decoded op stream differs from the transcript at element {i}");
+        assert_eq!(
+            a, b,
+            "the decoded op stream differs from the transcript at element {i}"
+        );
     }
 }
 
@@ -338,8 +348,12 @@ pub struct PreState {
 
 fn bytesn(n: u32, bytes: &[u8]) -> AlignedValue {
     AlignedValue::new(
-        Value(vec![midnight_base_crypto::fab::ValueAtom(bytes.to_vec()).normalize()]),
-        Alignment(vec![AlignmentSegment::Atom(AlignmentAtom::Bytes { length: n })]),
+        Value(vec![
+            midnight_base_crypto::fab::ValueAtom(bytes.to_vec()).normalize()
+        ]),
+        Alignment(vec![AlignmentSegment::Atom(AlignmentAtom::Bytes {
+            length: n,
+        })]),
     )
     .expect("the bytes fit the atom")
 }

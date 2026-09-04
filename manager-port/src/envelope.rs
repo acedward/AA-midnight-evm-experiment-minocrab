@@ -29,7 +29,11 @@ use crate::ledger::MANAGER;
 use crate::payload::ExecutePayload;
 
 /// A boolean wire, as the AND of two boolean wires.
-fn and(c: &mut Circuit3, a: Wire3<FieldT, Public>, b: Wire3<FieldT, Public>) -> Wire3<FieldT, Public> {
+fn and(
+    c: &mut Circuit3,
+    a: Wire3<FieldT, Public>,
+    b: Wire3<FieldT, Public>,
+) -> Wire3<FieldT, Public> {
     c.mul(a, b)
 }
 
@@ -73,12 +77,28 @@ impl Selectors {
         let not_s0 = c.not(s0);
         let not_s1 = c.not(s1);
         let is_action = and(c, not_s0, not_s1);
-        Selectors { s0, s1, s2, s3, s4, s5, s6, is_action, is_withdraw, is_transfer }
+        Selectors {
+            s0,
+            s1,
+            s2,
+            s3,
+            s4,
+            s5,
+            s6,
+            is_action,
+            is_withdraw,
+            is_transfer,
+        }
     }
 }
 
 /// `assert(cond, msg)` under a guard wire.
-fn guarded(c: &mut Circuit3, guard: Wire3<FieldT, Public>, check: Check<Public>, msg: &'static str) {
+fn guarded(
+    c: &mut Circuit3,
+    guard: Wire3<FieldT, Public>,
+    check: Check<Public>,
+    msg: &'static str,
+) {
     c.assert(check.message(msg).when(guard));
 }
 
@@ -95,42 +115,112 @@ pub fn assert_action_envelope(c: &mut Circuit3, p: &ExecutePayload<Public>, s: &
 
         // ---- selector 0: native registration -------------------------------------------------
         let g = s.s0;
-        guarded(c, g, p.auth_mode.eq(0u64), "native registration requires native authorization");
+        guarded(
+            c,
+            g,
+            p.auth_mode.eq(0u64),
+            "native registration requires native authorization",
+        );
         let acct_zero = b32_is_zero(c, &p.account);
         guarded(c, g, acct_zero, "native registration account is derived");
         let salt_zero = b32_is_zero(c, &p.account_salt);
-        guarded(c, g, owner_is_zero(p).and(salt_zero), "native registration EVM fields must be inactive");
-        guarded(c, g, p.nonce.eq(0u64).and(p.valid_until.eq(0u64)), "native registration replay fields must be inactive");
+        guarded(
+            c,
+            g,
+            owner_is_zero(p).and(salt_zero),
+            "native registration EVM fields must be inactive",
+        );
+        guarded(
+            c,
+            g,
+            p.nonce.eq(0u64).and(p.valid_until.eq(0u64)),
+            "native registration replay fields must be inactive",
+        );
         let color_zero = b32_is_zero(c, &p.primary_color);
-        guarded(c, g, color_zero.and(p.primary_amount.eq(0u64)), "native registration action fields must be inactive");
+        guarded(
+            c,
+            g,
+            color_zero.and(p.primary_amount.eq(0u64)),
+            "native registration action fields must be inactive",
+        );
         let rcpt_zero = b32_is_zero(c, &p.recipient);
-        guarded(c, g, p.recipient_kind.eq(0u64).and(rcpt_zero), "native registration recipient must be inactive");
+        guarded(
+            c,
+            g,
+            p.recipient_kind.eq(0u64).and(rcpt_zero),
+            "native registration recipient must be inactive",
+        );
         let to_zero = b32_is_zero(c, &p.to_account);
         let wn_zero = b32_is_zero(c, &p.want_nonce);
-        guarded(c, g, to_zero.and(wn_zero), "native registration targets must be inactive");
+        guarded(
+            c,
+            g,
+            to_zero.and(wn_zero),
+            "native registration targets must be inactive",
+        );
         let wc_zero = b32_is_zero(c, &p.want_color);
         let ca_zero = b32_is_zero(c, &p.credit_account);
-        guarded(c, g, wc_zero.and(p.want_amount.eq(0u64)).and(ca_zero), "native registration swap fields must be inactive");
+        guarded(
+            c,
+            g,
+            wc_zero.and(p.want_amount.eq(0u64)).and(ca_zero),
+            "native registration swap fields must be inactive",
+        );
 
         // ---- selector 1: EVM registration -----------------------------------------------------
         let g = s.s1;
-        guarded(c, g, p.auth_mode.eq(1u64), "EVM registration requires EVM authorization");
+        guarded(
+            c,
+            g,
+            p.auth_mode.eq(1u64),
+            "EVM registration requires EVM authorization",
+        );
         let acct_nz = b32_is_nonzero(c, &p.account);
         guarded(c, g, acct_nz, "EVM registration account must be supplied");
-        guarded(c, g, not(owner_is_zero(p)), "EVM registration owner must be nonzero");
+        guarded(
+            c,
+            g,
+            not(owner_is_zero(p)),
+            "EVM registration owner must be nonzero",
+        );
         let salt_nz = b32_is_nonzero(c, &p.account_salt);
         guarded(c, g, salt_nz, "EVM registration salt must be nonzero");
-        guarded(c, g, p.nonce.eq(0u64).and(p.valid_until.gt(0u64)), "EVM registration replay fields are noncanonical");
+        guarded(
+            c,
+            g,
+            p.nonce.eq(0u64).and(p.valid_until.gt(0u64)),
+            "EVM registration replay fields are noncanonical",
+        );
         let color_zero = b32_is_zero(c, &p.primary_color);
-        guarded(c, g, color_zero.and(p.primary_amount.eq(0u64)), "EVM registration action fields must be inactive");
+        guarded(
+            c,
+            g,
+            color_zero.and(p.primary_amount.eq(0u64)),
+            "EVM registration action fields must be inactive",
+        );
         let rcpt_zero = b32_is_zero(c, &p.recipient);
-        guarded(c, g, p.recipient_kind.eq(0u64).and(rcpt_zero), "EVM registration recipient must be inactive");
+        guarded(
+            c,
+            g,
+            p.recipient_kind.eq(0u64).and(rcpt_zero),
+            "EVM registration recipient must be inactive",
+        );
         let to_zero = b32_is_zero(c, &p.to_account);
         let wn_zero = b32_is_zero(c, &p.want_nonce);
-        guarded(c, g, to_zero.and(wn_zero), "EVM registration targets must be inactive");
+        guarded(
+            c,
+            g,
+            to_zero.and(wn_zero),
+            "EVM registration targets must be inactive",
+        );
         let wc_zero = b32_is_zero(c, &p.want_color);
         let ca_zero = b32_is_zero(c, &p.credit_account);
-        guarded(c, g, wc_zero.and(p.want_amount.eq(0u64)).and(ca_zero), "EVM registration swap fields must be inactive");
+        guarded(
+            c,
+            g,
+            wc_zero.and(p.want_amount.eq(0u64)).and(ca_zero),
+            "EVM registration swap fields must be inactive",
+        );
 
         // ---- the common action asserts (selectors 2..6) ---------------------------------------
         let g = s.is_action;
@@ -143,42 +233,107 @@ pub fn assert_action_envelope(c: &mut Circuit3, p: &ExecutePayload<Public>, s: &
         let native_mode = p.auth_mode.eq(0u64).into_wire(c);
         let evm_mode = c.not(native_mode);
         let g_native = and(c, g, native_mode);
-        guarded(c, g_native, owner_is_zero(p), "native action owner must be inactive");
-        guarded(c, g_native, p.nonce.eq(0u64).and(p.valid_until.eq(0u64)), "native action replay fields must be inactive");
+        guarded(
+            c,
+            g_native,
+            owner_is_zero(p),
+            "native action owner must be inactive",
+        );
+        guarded(
+            c,
+            g_native,
+            p.nonce.eq(0u64).and(p.valid_until.eq(0u64)),
+            "native action replay fields must be inactive",
+        );
         let g_evm = and(c, g, evm_mode);
-        guarded(c, g_evm, not(owner_is_zero(p)), "EVM action owner must be nonzero");
-        guarded(c, g_evm, p.valid_until.gt(0u64), "EVM action deadline must be nonzero");
+        guarded(
+            c,
+            g_evm,
+            not(owner_is_zero(p)),
+            "EVM action owner must be nonzero",
+        );
+        guarded(
+            c,
+            g_evm,
+            p.valid_until.gt(0u64),
+            "EVM action deadline must be nonzero",
+        );
 
         // ---- selectors 2/3: withdraw ----------------------------------------------------------
         let g = and(c, s.is_action, s.is_withdraw);
-        guarded(c, g, p.primary_amount.gt(0u64), "withdraw amount must be positive");
-        guarded(c, g, p.recipient_kind.le(1u64), "withdraw recipient kind is invalid");
+        guarded(
+            c,
+            g,
+            p.primary_amount.gt(0u64),
+            "withdraw amount must be positive",
+        );
+        guarded(
+            c,
+            g,
+            p.recipient_kind.le(1u64),
+            "withdraw recipient kind is invalid",
+        );
         // PR#10 / project 00016 — the envelope refuses the contract-recipient payout shapes.
         // Source order matters: this sits immediately after the `<= 1` bound and before the
         // nonzero check (`manager.compact`, selector 2||3 block).
-        guarded(c, g, p.recipient_kind.eq(0u64), "withdraw to a contract recipient is not supported");
+        guarded(
+            c,
+            g,
+            p.recipient_kind.eq(0u64),
+            "withdraw to a contract recipient is not supported",
+        );
         let rcpt_nz = b32_is_nonzero(c, &p.recipient);
         guarded(c, g, rcpt_nz, "withdraw recipient must be nonzero");
         let to_zero = b32_is_zero(c, &p.to_account);
         guarded(c, g, to_zero, "withdraw transfer target must be inactive");
         let wn_zero = b32_is_zero(c, &p.want_nonce);
         let wc_zero = b32_is_zero(c, &p.want_color);
-        guarded(c, g, wn_zero.and(wc_zero), "withdraw swap fields must be inactive");
+        guarded(
+            c,
+            g,
+            wn_zero.and(wc_zero),
+            "withdraw swap fields must be inactive",
+        );
         let ca_zero = b32_is_zero(c, &p.credit_account);
-        guarded(c, g, p.want_amount.eq(0u64).and(ca_zero), "withdraw swap target must be inactive");
+        guarded(
+            c,
+            g,
+            p.want_amount.eq(0u64).and(ca_zero),
+            "withdraw swap target must be inactive",
+        );
 
         // ---- selectors 4/5: internal transfer --------------------------------------------------
         let g = and(c, s.is_action, s.is_transfer);
-        guarded(c, g, p.primary_amount.gt(0u64), "internal transfer must be positive");
+        guarded(
+            c,
+            g,
+            p.primary_amount.gt(0u64),
+            "internal transfer must be positive",
+        );
         let rcpt_zero = b32_is_zero(c, &p.recipient);
-        guarded(c, g, p.recipient_kind.eq(0u64).and(rcpt_zero), "internal transfer recipient must be inactive");
+        guarded(
+            c,
+            g,
+            p.recipient_kind.eq(0u64).and(rcpt_zero),
+            "internal transfer recipient must be inactive",
+        );
         let to_nz = b32_is_nonzero(c, &p.to_account);
         guarded(c, g, to_nz, "internal transfer target must be supplied");
         let wn_zero = b32_is_zero(c, &p.want_nonce);
         let wc_zero = b32_is_zero(c, &p.want_color);
-        guarded(c, g, wn_zero.and(wc_zero), "internal transfer swap fields must be inactive");
+        guarded(
+            c,
+            g,
+            wn_zero.and(wc_zero),
+            "internal transfer swap fields must be inactive",
+        );
         let ca_zero = b32_is_zero(c, &p.credit_account);
-        guarded(c, g, p.want_amount.eq(0u64).and(ca_zero), "internal transfer swap target must be inactive");
+        guarded(
+            c,
+            g,
+            p.want_amount.eq(0u64).and(ca_zero),
+            "internal transfer swap target must be inactive",
+        );
 
         // ---- the trailing block: selector 6, open swap ------------------------------------------
         let not_wd = c.not(s.is_withdraw);
@@ -186,10 +341,25 @@ pub fn assert_action_envelope(c: &mut Circuit3, p: &ExecutePayload<Public>, s: &
         let rest = and(c, not_wd, not_tr);
         let g = and(c, s.is_action, rest);
         guarded(c, g, p.selector.eq(6u64), "unknown execute selector");
-        guarded(c, g, p.primary_amount.gt(0u64), "swap must give a positive amount");
-        guarded(c, g, p.recipient_kind.le(2u64), "swap recipient kind is invalid");
+        guarded(
+            c,
+            g,
+            p.primary_amount.gt(0u64),
+            "swap must give a positive amount",
+        );
+        guarded(
+            c,
+            g,
+            p.recipient_kind.le(2u64),
+            "swap recipient kind is invalid",
+        );
         // PR#10 / project 00016 — a swap taker may be a user (1) or open (0), never a contract (2).
-        guarded(c, g, p.recipient_kind.le(1u64), "swap to a contract taker is not supported");
+        guarded(
+            c,
+            g,
+            p.recipient_kind.le(1u64),
+            "swap to a contract taker is not supported",
+        );
 
         // `if (recipientKind == 0) { recipient must be zero } else { must be nonzero }`
         let kind0 = p.recipient_kind.eq(0u64).into_wire(c);
@@ -203,7 +373,12 @@ pub fn assert_action_envelope(c: &mut Circuit3, p: &ExecutePayload<Public>, s: &
 
         let to_zero = b32_is_zero(c, &p.to_account);
         guarded(c, g, to_zero, "swap transfer target must be inactive");
-        guarded(c, g, p.want_amount.gt(0u64), "swap must want a positive amount");
+        guarded(
+            c,
+            g,
+            p.want_amount.gt(0u64),
+            "swap must want a positive amount",
+        );
         let colours_eq = b32_eq(c, &p.primary_color, &p.want_color);
         guarded(c, g, not(colours_eq), "swap legs must be different colours");
         let ca_nz = b32_is_nonzero(c, &p.credit_account);
@@ -286,7 +461,9 @@ pub fn authenticated_action_account_effects(
             );
             let has_owner = MANAGER.evm_owners.member(c, &p.account);
             let has_nonce = c
-                .when_value(has_owner.field(), |c| MANAGER.evm_nonces.member(c, &p.account))
+                .when_value(has_owner.field(), |c| {
+                    MANAGER.evm_nonces.member(c, &p.account)
+                })
                 .otherwise(|c| Bool::constant(c, false))
                 .into_inner();
             c.assert(

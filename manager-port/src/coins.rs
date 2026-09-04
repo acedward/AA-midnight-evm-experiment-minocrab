@@ -174,7 +174,8 @@ impl LedgerRepr for PooledCoin {
 ///
 /// The slot comes from [`crate::ledger::slot::POOLS`], so this view and the write view are the
 /// same field by construction rather than by two matching literals.
-pub const POOLS_READ: LedgerMap<B32<Public>, PooledCoin> = LedgerMap::at(crate::ledger::slot::POOLS);
+pub const POOLS_READ: LedgerMap<B32<Public>, PooledCoin> =
+    LedgerMap::at(crate::ledger::slot::POOLS);
 
 /// The read view and the write view name the SAME ledger field.
 ///
@@ -316,11 +317,7 @@ pub fn send_unshielded(
 /// `mergeCoin` write inline (`domain ‖ degrade(nonce)`), not the stdlib circuit's three-element form
 /// with an index. Transcribed here from minocrab's own v2 body (`minocrab-std/src/coin.rs:172-177`),
 /// which is itself compactc's lowering, over the v3 `hash` helpers.
-pub fn evolve_nonce(
-    c: &mut Circuit3,
-    index: u64,
-    nonce: &B32<Public>,
-) -> B32<Public> {
+pub fn evolve_nonce(c: &mut Circuit3, index: u64, nonce: &B32<Public>) -> B32<Public> {
     let domain = minocrab::Fr::from_le_bytes(b"midnight:kernel:nonce_evolve")
         .expect("the 28-byte domain fits the field");
     let index = c.constant(index);

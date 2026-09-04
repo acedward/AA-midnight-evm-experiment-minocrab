@@ -53,7 +53,11 @@ use crate::guards::b32_eq;
 use crate::ledger::MANAGER;
 
 /// `a || b` on Booleans, as compactc lowers it: `cond_select(a, 1, b)`.
-fn or(c: &mut Circuit3, a: Wire3<FieldT, Public>, b: Wire3<FieldT, Public>) -> Wire3<FieldT, Public> {
+fn or(
+    c: &mut Circuit3,
+    a: Wire3<FieldT, Public>,
+    b: Wire3<FieldT, Public>,
+) -> Wire3<FieldT, Public> {
     c.cond_select(a, 1u64, b)
 }
 
@@ -78,9 +82,11 @@ fn shielded_balance_at(c: &mut Circuit3, k: &B32<Public>) -> Uint<128, Public> {
 /// `unshieldedBalances.member(k) ? unshieldedBalances.lookup(k) : 0` (`contracts/modules/UnshieldedCustody.compact:90-92`).
 fn unshielded_balance_at(c: &mut Circuit3, k: &B32<Public>) -> Uint<128, Public> {
     let present = MANAGER.unshielded_balances.member(c, k);
-    c.when_value(present.field(), |c| MANAGER.unshielded_balances.lookup(c, k))
-        .otherwise(|c| Uint::<128, Public>::constant(c, 0))
-        .into_inner()
+    c.when_value(present.field(), |c| {
+        MANAGER.unshielded_balances.lookup(c, k)
+    })
+    .otherwise(|c| Uint::<128, Public>::constant(c, 0))
+    .into_inner()
 }
 
 /// The muxed selector algebra of `contracts/modules/Custody.compact:219-236`.
@@ -369,9 +375,7 @@ pub fn custody_dispatch(
         // --- ONE debit write, into the muxed family ----------------------------------------------
         let new_debit = debit_balance.sub_with(c, val, "result of subtraction would be negative");
         c.when(m.debit_shielded, |c| {
-            MANAGER
-                .shielded_balances
-                .insert(c, &debit_key, &new_debit);
+            MANAGER.shielded_balances.insert(c, &debit_key, &new_debit);
         })
         .otherwise(|c| {
             MANAGER
@@ -425,7 +429,8 @@ pub fn custody_dispatch(
                 let next = as_uint128(c, sum);
                 MANAGER.unshielded_balances.insert(c, &credit_key, &next);
             });
-        });    })
+        });
+    })
 }
 
 /// `right<ZswapCoinPublicKey, ContractAddress>(kernel.self())` with its OWN read — the shape

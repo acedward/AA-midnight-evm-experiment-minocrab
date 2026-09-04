@@ -118,13 +118,15 @@ struct Arm {
 }
 
 fn load_prover_key(path: &str) -> ProverKey<IrSource> {
-    let f = std::fs::File::open(path).unwrap_or_else(|e| panic!("cannot open the prover key {path}: {e}"));
+    let f = std::fs::File::open(path)
+        .unwrap_or_else(|e| panic!("cannot open the prover key {path}: {e}"));
     IrSource::load_prover_key_from_tagged(std::io::BufReader::new(f))
         .unwrap_or_else(|e| panic!("cannot load the prover key {path}: {e}"))
 }
 
 fn load_verifier_key(path: &str) -> VerifierKey {
-    let f = std::fs::File::open(path).unwrap_or_else(|e| panic!("cannot open the verifier key {path}: {e}"));
+    let f = std::fs::File::open(path)
+        .unwrap_or_else(|e| panic!("cannot open the verifier key {path}: {e}"));
     let vk: VerifierKey = midnight_serialize::tagged_deserialize(std::io::BufReader::new(f))
         .unwrap_or_else(|e| panic!("cannot load the verifier key {path}: {e}"));
     vk.init()
@@ -184,7 +186,12 @@ fn load_avg() -> String {
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().trim_matches(|c| c == '{' || c == '}').trim().to_string())
+        .map(|s| {
+            s.trim()
+                .trim_matches(|c| c == '{' || c == '}')
+                .trim()
+                .to_string()
+        })
         .unwrap_or_else(|| "?".into())
 }
 
@@ -358,7 +365,10 @@ fn build_arm(f: &Flags, tag: &str, params_dir: &str) -> Arm {
     let ir = load_zkir(&zkir_path);
     let m = ir.model();
     let (k, rows) = (m.k(), m.rows());
-    eprintln!("  [ir] {zkir_path}: k={k}, rows={rows}, {} instructions", ir.instructions.len());
+    eprintln!(
+        "  [ir] {zkir_path}: k={k}, rows={rows}, {} instructions",
+        ir.instructions.len()
+    );
 
     let t0 = Instant::now();
     let pk = load_prover_key(&pk_path);
@@ -398,7 +408,10 @@ fn cmd_bench(args: &[String]) {
     let runs: usize = f.get("runs").parse().expect("--runs must be a number");
     let csv_path = f.get("csv");
     let scenario_names: Vec<String> = match f.opt("scenarios", "") {
-        s if s.is_empty() => model::all_scenarios().iter().map(|x| x.name.to_string()).collect(),
+        s if s.is_empty() => model::all_scenarios()
+            .iter()
+            .map(|x| x.name.to_string())
+            .collect(),
         s => s.split(',').map(|x| x.trim().to_string()).collect(),
     };
 
@@ -425,7 +438,8 @@ fn cmd_bench(args: &[String]) {
         let sc = model::scenario_by_name(name);
         let pi = synth::synthesize(&a.ir, &sc.preimage())
             .unwrap_or_else(|e| panic!("{name}: could not synthesize a transcript: {e}"));
-        synth::check(&a.ir, &pi).unwrap_or_else(|e| panic!("{name}: arm A refuses its own preimage: {e}"));
+        synth::check(&a.ir, &pi)
+            .unwrap_or_else(|e| panic!("{name}: arm A refuses its own preimage: {e}"));
         synth::check(&b.ir, &pi).unwrap_or_else(|e| {
             panic!("{name}: arm B REFUSES the shared preimage: {e}\nThis invalidates the cell.")
         });
@@ -496,11 +510,35 @@ fn cmd_bench(args: &[String]) {
                     proof.0.len(),
                     pis.len()
                 );
-                row(&mut csv, "warmup", 0, arm, warm_name, ms, vms, ok, proof.0.len(), pis.len(), &la);
+                row(
+                    &mut csv,
+                    "warmup",
+                    0,
+                    arm,
+                    warm_name,
+                    ms,
+                    vms,
+                    ok,
+                    proof.0.len(),
+                    pis.len(),
+                    &la,
+                );
             }
             Err(e) => {
                 eprintln!("    WARMUP FAILED for {}: {e}", arm.name);
-                row(&mut csv, "warmup-failed", 0, arm, warm_name, f64::NAN, f64::NAN, false, 0, 0, &la);
+                row(
+                    &mut csv,
+                    "warmup-failed",
+                    0,
+                    arm,
+                    warm_name,
+                    f64::NAN,
+                    f64::NAN,
+                    false,
+                    0,
+                    0,
+                    &la,
+                );
                 panic!("arm {} cannot prove at all — see the error above", arm.name);
             }
         }
@@ -544,17 +582,50 @@ fn cmd_bench(args: &[String]) {
                             vms,
                             proof.0.len()
                         );
-                        row(&mut csv, "timed", idx, arm, name, ms, vms, ok, proof.0.len(), pis.len(), &la);
+                        row(
+                            &mut csv,
+                            "timed",
+                            idx,
+                            arm,
+                            name,
+                            ms,
+                            vms,
+                            ok,
+                            proof.0.len(),
+                            pis.len(),
+                            &la,
+                        );
                         if ok {
-                            cells.entry((arm.name.clone(), name.clone())).or_default().push(ms);
-                            vcells.entry((arm.name.clone(), name.clone())).or_default().push(vms);
+                            cells
+                                .entry((arm.name.clone(), name.clone()))
+                                .or_default()
+                                .push(ms);
+                            vcells
+                                .entry((arm.name.clone(), name.clone()))
+                                .or_default()
+                                .push(vms);
                             proof_sizes.insert(arm.name.clone(), proof.0.len());
                             pi_counts.insert(arm.name.clone(), pis.len());
                         }
                     }
                     Err(e) => {
-                        eprintln!("    !! {} / {name} run {idx}: PROVER REFUSED — {e}", arm.name);
-                        row(&mut csv, "prove-failed", idx, arm, name, f64::NAN, f64::NAN, false, 0, 0, &la);
+                        eprintln!(
+                            "    !! {} / {name} run {idx}: PROVER REFUSED — {e}",
+                            arm.name
+                        );
+                        row(
+                            &mut csv,
+                            "prove-failed",
+                            idx,
+                            arm,
+                            name,
+                            f64::NAN,
+                            f64::NAN,
+                            false,
+                            0,
+                            0,
+                            &la,
+                        );
                     }
                 }
             }
@@ -574,7 +645,10 @@ fn cmd_bench(args: &[String]) {
             let key = (arm.name.clone(), name.clone());
             let mut v = cells.get(&key).cloned().unwrap_or_default();
             if v.is_empty() {
-                println!("| {} | {} | {} | `{name}` | 0 | — | — | — | — | — | — |", arm.name, arm.k, arm.rows);
+                println!(
+                    "| {} | {} | {} | `{name}` | 0 | — | — | — | — | — | — |",
+                    arm.name, arm.k, arm.rows
+                );
                 continue;
             }
             let n = v.len();
@@ -633,7 +707,10 @@ fn cmd_bench(args: &[String]) {
     );
     println!("UNVERIFIED PROOFS (not counted): {unverified}");
     if !wide_cells.is_empty() {
-        println!("CELLS WITH SPREAD > 20% OF MEDIAN: {}", wide_cells.join("; "));
+        println!(
+            "CELLS WITH SPREAD > 20% OF MEDIAN: {}",
+            wide_cells.join("; ")
+        );
     } else {
         println!("CELLS WITH SPREAD > 20% OF MEDIAN: none");
     }
@@ -663,7 +740,10 @@ fn cmd_solo(args: &[String]) {
     let runs: usize = f.get("runs").parse().expect("--runs must be a number");
     let csv_path = f.get("csv");
     let scenario_names: Vec<String> = match f.opt("scenarios", "") {
-        s if s.is_empty() => model::all_scenarios().iter().map(|x| x.name.to_string()).collect(),
+        s if s.is_empty() => model::all_scenarios()
+            .iter()
+            .map(|x| x.name.to_string())
+            .collect(),
         s => s.split(',').map(|x| x.trim().to_string()).collect(),
     };
     // The transcript is always synthesized from the compactc artifact, exactly as in `bench`, so a
@@ -691,12 +771,29 @@ fn cmd_solo(args: &[String]) {
     .unwrap();
     csv.flush().unwrap();
 
-    let write_row = |csv: &mut std::fs::File, phase: &str, idx: usize, scenario: &str,
-                     prove_ms: f64, verify_ms: f64, verified: bool, pb: usize, pc: usize, la: &str| {
+    let write_row = |csv: &mut std::fs::File,
+                     phase: &str,
+                     idx: usize,
+                     scenario: &str,
+                     prove_ms: f64,
+                     verify_ms: f64,
+                     verified: bool,
+                     pb: usize,
+                     pc: usize,
+                     la: &str| {
         writeln!(
             csv,
             "{phase},{idx},{},{},{},{scenario},{:.3},{:.3},{},{},{},{},\"{}\",{}",
-            arm.name, arm.k, arm.rows, prove_ms, verify_ms, verified, pb, pc, rss_bytes(), la,
+            arm.name,
+            arm.k,
+            arm.rows,
+            prove_ms,
+            verify_ms,
+            verified,
+            pb,
+            pc,
+            rss_bytes(),
+            la,
             chrono_utc()
         )
         .unwrap();
@@ -710,12 +807,26 @@ fn cmd_solo(args: &[String]) {
         Ok((proof, pis, ms)) => {
             let (ok, vms) = timed_verify(&arm, &proof, &pis);
             eprintln!("  warmup {:.1} ms verified={ok}", ms);
-            write_row(&mut csv, "warmup", 0, wn, ms, vms, ok, proof.0.len(), pis.len(), &la);
+            write_row(
+                &mut csv,
+                "warmup",
+                0,
+                wn,
+                ms,
+                vms,
+                ok,
+                proof.0.len(),
+                pis.len(),
+                &la,
+            );
         }
         Err(e) => panic!("solo warmup failed for {}: {e}", arm.name),
     }
 
-    println!("== 00018 Phase 2 supplement — SOLO run, arm `{}` ==", arm.name);
+    println!(
+        "== 00018 Phase 2 supplement — SOLO run, arm `{}` ==",
+        arm.name
+    );
     let mut all: Vec<f64> = Vec::new();
     for idx in 1..=runs {
         let la = load_avg();
@@ -723,15 +834,40 @@ fn cmd_solo(args: &[String]) {
             match timed_prove(&arm, &params, pi, (idx as u64) << 8 | arm.k as u64) {
                 Ok((proof, pis, ms)) => {
                     let (ok, vms) = timed_verify(&arm, &proof, &pis);
-                    eprintln!("  {:<9} {:<30} {:>9.1} ms verified={ok}", arm.name, name, ms);
-                    write_row(&mut csv, "timed", idx, name, ms, vms, ok, proof.0.len(), pis.len(), &la);
+                    eprintln!(
+                        "  {:<9} {:<30} {:>9.1} ms verified={ok}",
+                        arm.name, name, ms
+                    );
+                    write_row(
+                        &mut csv,
+                        "timed",
+                        idx,
+                        name,
+                        ms,
+                        vms,
+                        ok,
+                        proof.0.len(),
+                        pis.len(),
+                        &la,
+                    );
                     if ok {
                         all.push(ms);
                     }
                 }
                 Err(e) => {
                     eprintln!("  !! {} / {name} run {idx}: PROVER REFUSED — {e}", arm.name);
-                    write_row(&mut csv, "prove-failed", idx, name, f64::NAN, f64::NAN, false, 0, 0, &la);
+                    write_row(
+                        &mut csv,
+                        "prove-failed",
+                        idx,
+                        name,
+                        f64::NAN,
+                        f64::NAN,
+                        false,
+                        0,
+                        0,
+                        &la,
+                    );
                 }
             }
         }
@@ -782,10 +918,14 @@ fn main() {
             eprintln!("usage: prove-bench check <a.zkir> <b.zkir>");
             eprintln!("       prove-bench bench --a-name .. --a-zkir .. --a-pk .. --a-vk .. \\");
             eprintln!("                         --b-name .. --b-zkir .. --b-pk .. --b-vk .. \\");
-            eprintln!("                         --params DIR --runs N --csv PATH [--scenarios a,b]");
+            eprintln!(
+                "                         --params DIR --runs N --csv PATH [--scenarios a,b]"
+            );
             eprintln!("       prove-bench solo  --a-name .. --a-zkir .. --a-pk .. --a-vk .. \\");
             eprintln!("                         --ref-zkir <compactc.zkir> \\");
-            eprintln!("                         --params DIR --runs N --csv PATH [--scenarios a,b]");
+            eprintln!(
+                "                         --params DIR --runs N --csv PATH [--scenarios a,b]"
+            );
             std::process::exit(64);
         }
     }

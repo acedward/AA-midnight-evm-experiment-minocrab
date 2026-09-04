@@ -104,7 +104,9 @@ fn assert_call_compatible(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage
         our_run.pi_skips
     );
     assert_eq!(
-        theirs.check(pi).expect("upstream accepts the compactc artifact"),
+        theirs
+            .check(pi)
+            .expect("upstream accepts the compactc artifact"),
         their_run.pi_skips
     );
 }

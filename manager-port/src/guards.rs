@@ -76,9 +76,9 @@ pub fn owner_commitment<V: Vis3>(c: &mut Circuit3, sk: &B32<V>) -> B32<V> {
         let tag = {
             let mut le = [0u8; 21];
             le.copy_from_slice(DOMAIN);
-            V::from_public(c.constant(
-                minocrab::Fr::from_le_bytes(&le).expect("21 bytes fit the field"),
-            ))
+            V::from_public(
+                c.constant(minocrab::Fr::from_le_bytes(&le).expect("21 bytes fit the field")),
+            )
         };
         let alignment = minocrab::Alignment(vec![
             minocrab::AlignmentSegment::Atom(minocrab::AlignmentAtom::Bytes { length: 32 }),
@@ -123,14 +123,10 @@ pub fn register_account(
     c.assert(nonzero.message("account id must be nonzero"));
 
     let already = MANAGER.accounts.member(c, acct);
-    c.assert(
-        minocrab_std::v3::not(is_true(already)).message("account already registered"),
-    );
+    c.assert(minocrab_std::v3::not(is_true(already)).message("account already registered"));
 
     let mode_collision = MANAGER.account_modes.member(c, acct);
-    c.assert(
-        minocrab_std::v3::not(is_true(mode_collision)).message("account mode collision"),
-    );
+    c.assert(minocrab_std::v3::not(is_true(mode_collision)).message("account mode collision"));
 
     MANAGER.accounts.insert(c, acct);
     MANAGER.account_modes.insert(c, acct, &mode);

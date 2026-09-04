@@ -409,7 +409,13 @@ impl Reads {
     }
 
     /// A `QualifiedShieldedCoinInfo` (`pools.lookup`) — six limbs.
-    pub fn coin(&mut self, nonce: &[u8; 32], color: &[u8; 32], value: u128, mt_index: u64) -> &mut Self {
+    pub fn coin(
+        &mut self,
+        nonce: &[u8; 32],
+        color: &[u8; 32],
+        value: u128,
+        mt_index: u64,
+    ) -> &mut Self {
         self.b32(nonce);
         self.b32(color);
         self.u128(value);

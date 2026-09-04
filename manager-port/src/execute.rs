@@ -102,12 +102,10 @@ fn body(
     // `selector != 0` — op 4-6. Writing it inside the `otherwise` closure reproduces that exactly.
     let zero = c.constant(0u64);
     let zero_b32 = B32 { hi: zero, lo: zero };
-    let digest = c
-        .when_value(s.s0, |_c| zero_b32)
-        .otherwise(|c| {
-            let domain = MANAGER.deployment_domain.read(c);
-            evm_digest_for(c, &manager, &domain, &p)
-        });
+    let digest = c.when_value(s.s0, |_c| zero_b32).otherwise(|c| {
+        let domain = MANAGER.deployment_domain.read(c);
+        evm_digest_for(c, &manager, &domain, &p)
+    });
 
     // `const signatureOk = disclose(secp256k1EcdsaVerify(digest, sig, pk));`
     // `const signer = disclose(secp256k1EthereumAddress(pk));`
@@ -331,11 +329,7 @@ fn evm_struct_hash_for(
         let rest = c.cond_select(not_s1, not_wd, 0u64);
         let rest = c.cond_select(rest, not_tr, 0u64);
         c.when(rest, |c| {
-            c.assert(
-                p.selector
-                    .eq(6u64)
-                    .message("EIP-712 selector must be 1..6"),
-            );
+            c.assert(p.selector.eq(6u64).message("EIP-712 selector must be 1..6"));
         });
 
         // s1 ? register : (isWithdraw ? withdraw : (isTransfer ? transfer : swap))

@@ -21,8 +21,8 @@
 //! That claim is **not taken on faith**: it is what the frozen-fixture suite checks, on 60 cases
 //! across all six action types. If it were wrong, every digest would differ.
 
-use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::v3::AnyWire3;
+use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::{Alignment, AlignmentAtom, AlignmentSegment, Public};
 use minocrab_std::v3::{pow2_const, Vis3, B32};
 
@@ -115,7 +115,10 @@ fn push_b32<V: Vis3>(limbs: &mut Vec<AnyWire3<V>>, b: &B32<V>) {
 /// Lift a public `B32` constant into the caller's visibility. Zero instructions — it is the
 /// same two wires, retyped.
 fn b32_from_public<V: Vis3>(b: B32<Public>) -> B32<V> {
-    B32 { hi: V::from_public(b.hi), lo: V::from_public(b.lo) }
+    B32 {
+        hi: V::from_public(b.hi),
+        lo: V::from_public(b.lo),
+    }
 }
 
 /// `evmAccountIdFor(manager, owner, salt)` (`contracts/modules/Eip712.compact:139-144`).
@@ -239,7 +242,10 @@ pub fn struct_hash_preimage_register<V: Vis3>(
     push_b32(&mut limbs, &owner_word);
     push_b32(&mut limbs, &p.account_salt);
     push_b32(&mut limbs, &valid_until);
-    StructHashPreimage { word_count: 6, limbs }
+    StructHashPreimage {
+        word_count: 6,
+        limbs,
+    }
 }
 
 /// Selectors 2 and 3 — `WithdrawShielded` / `WithdrawUnshielded`, `Bytes<320>` = 10 words:
@@ -270,7 +276,10 @@ pub fn struct_hash_preimage_withdraw<V: Vis3>(
     push_b32(&mut limbs, &amount);
     push_b32(&mut limbs, &kind);
     push_b32(&mut limbs, &p.recipient);
-    StructHashPreimage { word_count: 10, limbs }
+    StructHashPreimage {
+        word_count: 10,
+        limbs,
+    }
 }
 
 /// Selectors 4 and 5 — `TransferInternalShielded` / `TransferInternalUnshielded`, `Bytes<288>` =
@@ -296,7 +305,10 @@ pub fn struct_hash_preimage_transfer<V: Vis3>(
     push_b32(&mut limbs, &p.to_account);
     push_b32(&mut limbs, &p.primary_color);
     push_b32(&mut limbs, &amount);
-    StructHashPreimage { word_count: 9, limbs }
+    StructHashPreimage {
+        word_count: 9,
+        limbs,
+    }
 }
 
 /// Selector 6 — `OpenSwapShielded`, `Bytes<448>` = 14 words:
@@ -331,14 +343,14 @@ pub fn struct_hash_preimage_open_swap<V: Vis3>(
     push_b32(&mut limbs, &p.want_color);
     push_b32(&mut limbs, &want_amount);
     push_b32(&mut limbs, &p.credit_account);
-    StructHashPreimage { word_count: 14, limbs }
+    StructHashPreimage {
+        word_count: 14,
+        limbs,
+    }
 }
 
 /// Hash a prepared struct-hash preimage.
-pub fn hash_struct_preimage<V: Vis3>(
-    c: &mut Circuit3,
-    pre: StructHashPreimage<V>,
-) -> B32<V> {
+pub fn hash_struct_preimage<V: Vis3>(c: &mut Circuit3, pre: StructHashPreimage<V>) -> B32<V> {
     let d = c.keccak256(words(pre.word_count), &pre.limbs);
     B32::from_typed(c, d)
 }

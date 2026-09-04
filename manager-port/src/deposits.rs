@@ -36,7 +36,7 @@
 use minocrab::v3::{Circuit3, Compiled3};
 use minocrab::{Private, Public};
 use minocrab_std::v3::{
-    circuit, is_true, kernel, label, CircuitArg, CoinColor, CoinNonce, Discloses, Disclose,
+    circuit, is_true, kernel, label, CircuitArg, CoinColor, CoinNonce, Disclose, Discloses,
     ShieldedCoinInfo3, Uint, B32,
 };
 
@@ -130,7 +130,9 @@ pub fn deposit_shielded(
         let existing = POOLS_READ.lookup(c, &coin.color);
         let merged = kernel::merge_coin_immediate(c, &existing.as_qualified(), &info);
         let recipient = self_recipient(c);
-        MANAGER.pools.insert_coin(c, &coin.color, &merged, &recipient);
+        MANAGER
+            .pools
+            .insert_coin(c, &coin.color, &merged, &recipient);
     })
     .otherwise(|c| {
         // FIRST CREDIT of this colour — the pool is created lazily, right here.

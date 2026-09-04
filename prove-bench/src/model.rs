@@ -547,7 +547,7 @@ pub fn sel0_native_registration() -> Scenario {
     let (r, s, pk) = dummy_signature();
     let mut reads = Reads::new();
     reads.b32(&self_addr()); // `kernel.self()`
-    // `deploymentDomain` is GUARDED OFF for selector 0.
+                             // `deploymentDomain` is GUARDED OFF for selector 0.
     reads.bool(false); // `accounts.member(account)`
     reads.bool(false); // `accountModes.member(account)`
     Scenario {
@@ -659,7 +659,8 @@ pub fn sel3_withdraw_unshielded_native() -> Scenario {
     reads.bool(false); //  `unshieldedBalance(col) < val` — the contract holds enough
     Scenario {
         name: "sel3-withdraw-unshielded-native",
-        what: "selector 3 — withdraw unshielded, native (User-tagged payout; PR#9 made it provable)",
+        what:
+            "selector 3 — withdraw unshielded, native (User-tagged payout; PR#9 made it provable)",
         payload: Payload {
             selector: 3,
             auth_mode: 0,
