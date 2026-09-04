@@ -1,5 +1,13 @@
 //! Phase 3.1 — leaf helpers: constants and the big-endian EVM word encoders.
 //!
+//! **Compact twin**: `contracts/modules/ByteCodec.compact`. **Circuits ported here: none** — every
+//! circuit in that module is `pure`, emits no key, and is not among the nine provable circuits;
+//! what is here is what the provable ones call. `bytes32LexicographicLt` is not transcribed: its
+//! only consumer is `SemanticCommitment`, which this crate does not port.
+//! `reverseBytes16` is not a separate function here — [`reverse_bytes32`] is the whole family,
+//! and [`numeric_word`] covers `uint8Word` / `uint64Word` / `uint128Word` at once, for the reason
+//! its own doc comment gives.
+//!
 //! These are the bottom of the `execute` port. They are also **where the row win is**: the
 //! compactc artifact spends 3,140 of `execute`'s 5,780 instructions on `div_mod_power_of_two` /
 //! `reconstitute_field` chains (54.3%), which is what the per-byte `Bytes[...]` permutations in

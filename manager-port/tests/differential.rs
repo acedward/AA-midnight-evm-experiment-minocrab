@@ -260,7 +260,7 @@ fn an_account() -> [u8; 32] {
 /// bar — but when it holds it is the strongest statement available, so it is recorded.
 #[test]
 fn is_registered_instruction_stream_matches_compactc() {
-    let ours = manager_port::queries::is_registered().ir;
+    let ours = manager_port::account_registry::is_registered().ir;
     let theirs = theirs("isRegistered");
 
     let canon = |ir: &IrSource| {
@@ -276,7 +276,7 @@ fn is_registered_instruction_stream_matches_compactc() {
 
 #[test]
 fn is_registered_matches_compactc_registered() {
-    let ours = manager_port::queries::is_registered().ir;
+    let ours = manager_port::account_registry::is_registered().ir;
     let theirs = theirs("isRegistered");
     assert_call_compatible(&ours, &theirs, &is_registered_scenario(&an_account(), 1));
 }
@@ -286,14 +286,14 @@ fn is_registered_matches_compactc_registered() {
 /// artifacts must accept and agree on the PI vector.
 #[test]
 fn is_registered_matches_compactc_not_registered() {
-    let ours = manager_port::queries::is_registered().ir;
+    let ours = manager_port::account_registry::is_registered().ir;
     let theirs = theirs("isRegistered");
     assert_call_compatible(&ours, &theirs, &is_registered_scenario(&[0u8; 32], 0));
 }
 
 #[test]
 fn is_registered_tamper_agreement() {
-    let ours = manager_port::queries::is_registered().ir;
+    let ours = manager_port::account_registry::is_registered().ir;
     let theirs = theirs("isRegistered");
     assert_tamper_agreement(&ours, &theirs, &is_registered_scenario(&an_account(), 1));
 }

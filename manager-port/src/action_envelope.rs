@@ -1,6 +1,19 @@
 //! Phase 3.3 — `assertActionEnvelope` (`contracts/modules/ActionEnvelope.compact:80-158`) and the account-selection
 //! guards (`contracts/modules/AccountRegistry.compact:171-207`).
 //!
+//! **Compact twin**: `contracts/modules/ActionEnvelope.compact`, which holds `ExecutePayload` and
+//! `assertActionEnvelope` — every canonical-zero rule for every selector, in one place.
+//! **Circuits ported here: none** — the module emits no key; its work shows up inside `execute`.
+//! [`ExecutePayload`] is the argument struct of `execute`, `evmStructHashFor`, `evmDigestFor`,
+//! `gatewayAccount` and `custodyDispatch` alike, which is why five Compact files import this one.
+//!
+//! [`Selectors`] has no Compact counterpart: Compact recomputes `p.selector == N` at each use and
+//! the compiler folds the repeats, while minocrab needs the wires named once. It emits the same
+//! comparisons in the same order.
+//!
+//! `authenticatedActionAccount` and `gatewayAccount` used to live here, when this file was
+//! `envelope.rs`; they are `AccountRegistry`'s and now live in [`crate::account_registry`].
+//!
 //! ## How Compact's early `return`s become guards
 //!
 //! The Compact source is a chain of `if (selector == N) { …asserts…; return; }` blocks. A circuit
@@ -22,11 +35,9 @@
 
 use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::Public;
-use minocrab_std::v3::{is_true, not, Bool, Check, Uint, B32};
+use minocrab_std::v3::{not, Bytes, Check, CircuitArg, Uint, B32};
 
-use crate::guards::{b32_eq, b32_is_nonzero, b32_is_zero};
-use crate::ledger::MANAGER;
-use crate::payload::ExecutePayload;
+use crate::checks::{b32_eq, b32_is_nonzero, b32_is_zero};
 
 /// A boolean wire, as the AND of two boolean wires.
 fn and(
@@ -386,126 +397,25 @@ pub fn assert_action_envelope(c: &mut Circuit3, p: &ExecutePayload<Public>, s: &
     })
 }
 
-/// `authenticatedActionAccount(p, nativeAccount)` (`contracts/modules/AccountRegistry.compact:171-191`).
-///
-/// Both arms are compiled; each arm's asserts bind only under its own mode, and the returned
-/// account is the `cond_select` of the two. Source order preserved within each arm.
-///
-/// **Compact's `&&` SHORT-CIRCUITS over ledger reads**, and both arms rely on it:
-/// `!evmOwners.member(acct) && !evmNonces.member(acct)` reads `evmNonces` only where the left
-/// operand held, and `evmOwners.member(p.account) && evmNonces.member(p.account)` likewise. The
-/// compactc artifact guards each second read by the first read's outcome (ops 30-34 and 54-58 of
-/// `evidence/00012/raw/00012-p3.4-execute-impact-ops.txt`), so the port does too — a `Check::and`
-/// would not, because by the time it runs the read has already been emitted.
-///
-/// The caller runs this inside `c.when(is_action, …)`; the two mode arms open their own scopes.
-///
-/// EFFECTS ONLY. Compact's `return acct` / `return p.account` is
-/// `cond_select(native_mode, nativeAccount, p.account)`, which is pure compute and is therefore
-/// **not** guarded in the artifact — the caller ([`gateway_account`]) computes it outside the
-/// scope. Returning it from inside a `when_value` would cost two extra selects compactc does not
-/// pay.
-pub fn authenticated_action_account_effects(
-    c: &mut Circuit3,
-    p: &ExecutePayload<Public>,
-    native_account: &B32<Public>,
-    native_mode: Wire3<FieldT, Public>,
-) {
-    c.region("auth: action account", |c| {
-        c.when(native_mode, |c| {
-            // ---- native arm ------------------------------------------------------------------
-            crate::guards::authenticated_native_account(c, native_account);
-
-            let same = b32_eq(c, native_account, &p.account);
-            c.assert(same.message("native witness does not match supplied account transcript"));
-            // A SECOND `accountModes.lookup(acct)` — `contracts/modules/AccountRegistry.compact:178` re-reads the cell rather
-            // than reusing `authenticatedNativeAccount`'s, and compactc inlines the call, so the
-            // artifact carries two identical lookups (ops 17-20 and 21-24). Reusing the first
-            // value here would drop an Impact instruction and fail `pi_skips` equality.
-            let mode = MANAGER.account_modes.lookup(c, native_account);
-            c.assert(
-                mode.eq(p.auth_mode)
-                    .message("authorization mode does not match account record"),
-            );
-            let has_owner = MANAGER.evm_owners.member(c, native_account);
-            let no_owner = c.not(has_owner.field());
-            // A SCOPE, not `member_under(c, no_owner, …)`: see the module docs on F-00012-07 —
-            // `_under` mints the read's gates against the AMBIENT guard while emitting the op under
-            // `ambient && guard`, so the two diverge and the run consumes a transcript output the
-            // reference never produced.
-            let has_nonce = c
-                .when_value(no_owner, |c| MANAGER.evm_nonces.member(c, native_account))
-                .otherwise(|c| Bool::constant(c, false))
-                .into_inner();
-            c.assert(
-                not(is_true(has_owner))
-                    .and(not(is_true(has_nonce)))
-                    .message("native account carries EVM state"),
-            );
-        })
-        .otherwise(|c| {
-            // ---- EVM arm ---------------------------------------------------------------------
-            c.assert(
-                p.auth_mode
-                    .eq(1u64)
-                    .message("unknown account authorization mode"),
-            );
-            let member = MANAGER.accounts.member(c, &p.account);
-            c.assert(is_true(member).message("gateway account is not registered"));
-            let has_mode = MANAGER.account_modes.member(c, &p.account);
-            c.assert(is_true(has_mode).message("registered account has no authorization mode"));
-            let mode = MANAGER.account_modes.lookup(c, &p.account);
-            c.assert(
-                mode.eq(1u64)
-                    .message("authorization mode does not match account record"),
-            );
-            let has_owner = MANAGER.evm_owners.member(c, &p.account);
-            let has_nonce = c
-                .when_value(has_owner.field(), |c| {
-                    MANAGER.evm_nonces.member(c, &p.account)
-                })
-                .otherwise(|c| Bool::constant(c, false))
-                .into_inner();
-            c.assert(
-                is_true(has_owner)
-                    .and(is_true(has_nonce))
-                    .message("EVM account record is incomplete"),
-            );
-            let stored_owner = MANAGER.evm_owners.lookup(c, &p.account);
-            c.assert(
-                p.owner
-                    .eq(stored_owner)
-                    .message("signed owner does not match stored owner"),
-            );
-            let stored_nonce = MANAGER.evm_nonces.lookup(c, &p.account);
-            c.assert(p.nonce.eq(stored_nonce).message("EVM nonce mismatch"));
-        });
-    })
-}
-
-/// `gatewayAccount(p, nativeAccount, evmRegistrationAccount)` (`contracts/modules/AccountRegistry.compact:195-207`).
-///
-/// Selector 0 → the native commitment, selector 1 → the derived EVM registration id, otherwise the
-/// authenticated action account. The action arm's ledger reads run under `is_action`, which is the
-/// `!s0 && !s1` fall-through of Compact's two early `return`s.
-pub fn gateway_account(
-    c: &mut Circuit3,
-    s: &Selectors,
-    p: &ExecutePayload<Public>,
-    native_account: &B32<Public>,
-    evm_registration_account: &B32<Public>,
-) -> B32<Public> {
-    let native_mode = p.auth_mode.eq(0u64).into_wire(c);
-    c.when(s.is_action, |c| {
-        authenticated_action_account_effects(c, p, native_account, native_mode)
-    });
-    let action_account = B32::cond_select(c, native_mode, native_account, &p.account);
-    // s0 ? native : (s1 ? evmRegistration : action)
-    let inner = B32::cond_select(c, s.s1, evm_registration_account, &action_account);
-    B32::cond_select(c, s.s0, native_account, &inner)
-}
-
-/// `Bool` helper kept local so callers do not need the import.
-pub fn as_bool<V: minocrab_std::v3::Vis3>(w: Wire3<FieldT, V>) -> Bool<V> {
-    Bool::from_field_unchecked(w)
+/// `struct ExecutePayload` — the muxed action envelope every `execute` call carries.
+#[derive(CircuitArg)]
+pub struct ExecutePayload<V: minocrab_std::v3::Vis3> {
+    /// 0 = native registration, 1..6 = the EIP-712 signed actions.
+    pub selector: Uint<8, V>,
+    /// 0 = native witness authorization, 1 = EVM EOA.
+    pub auth_mode: Uint<8, V>,
+    pub account: B32<V>,
+    pub owner: Bytes<20, V>,
+    pub account_salt: B32<V>,
+    pub nonce: Uint<64, V>,
+    pub valid_until: Uint<64, V>,
+    pub primary_color: B32<V>,
+    pub primary_amount: Uint<128, V>,
+    pub recipient_kind: Uint<8, V>,
+    pub recipient: B32<V>,
+    pub to_account: B32<V>,
+    pub want_nonce: B32<V>,
+    pub want_color: B32<V>,
+    pub want_amount: Uint<128, V>,
+    pub credit_account: B32<V>,
 }

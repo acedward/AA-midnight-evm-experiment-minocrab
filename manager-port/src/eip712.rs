@@ -1,6 +1,11 @@
 //! Phase 3.2 — the AUTH-EIP712-AA-V3-V1 chain: `evmAccountIdFor`, `evmDomainSeparatorFor`,
 //! `evmStructHashFor`, `evmDigestFor` (`contracts/modules/Eip712.compact:55-207`).
 //!
+//! **Compact twin**: `contracts/modules/Eip712.compact`, which holds the ten frozen EIP-712 hex
+//! constants and the whole digest chain. **Circuits ported here: none** — every circuit in that
+//! module is `pure` and emits no key; they are exported as free oracles and are called from
+//! `execute`.
+//!
 //! **These bytes are FROZEN.** They are what a MetaMask signature commits to, so a single wrong
 //! byte silently invalidates every signature the deployed contract would accept. The gate is
 //! therefore not "the differential passes" but byte-equality against the 00010 keyless suite's
@@ -26,8 +31,8 @@ use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::{Alignment, AlignmentAtom, AlignmentSegment, Public};
 use minocrab_std::v3::{pow2_const, Vis3, B32};
 
-use crate::payload::ExecutePayload;
-use crate::words::{address_word, b32_const, numeric_word};
+use crate::action_envelope::ExecutePayload;
+use crate::byte_codec::{address_word, b32_const, numeric_word};
 
 /// One `Bytes<n>` alignment segment.
 fn atom(n: u32) -> AlignmentSegment {
@@ -353,4 +358,77 @@ pub fn struct_hash_preimage_open_swap<V: Vis3>(
 pub fn hash_struct_preimage<V: Vis3>(c: &mut Circuit3, pre: StructHashPreimage<V>) -> B32<V> {
     let d = c.keccak256(words(pre.word_count), &pre.limbs);
     B32::from_typed(c, d)
+}
+
+/// `evmDigestFor(manager, domain, payload)` (`contracts/modules/Eip712.compact:201-207`) —
+/// `eip712Digest(evmDomainSeparatorFor(manager, domain), evmStructHashFor(manager, payload))`.
+pub fn evm_digest_for(
+    c: &mut Circuit3,
+    manager: &B32<Public>,
+    domain: &B32<Public>,
+    p: &ExecutePayload<Public>,
+) -> B32<Public> {
+    let sep = evm_domain_separator_for(c, manager, domain);
+    let sh = evm_struct_hash_for(c, manager, p);
+    eip712_digest(c, &sep, &sh)
+}
+
+/// `evmStructHashFor(manager, payload)` (`contracts/modules/Eip712.compact:158-192`).
+///
+/// A chain of `if (…) { return keccak(…); }` blocks: a circuit compiles every arm, so all four
+/// preimages are hashed and the answer is selected. The trailing
+/// `assert(p.selector == 6, "EIP-712 selector must be 1..6")` binds under the fall-through
+/// condition — which, combined with the caller's `selector != 0` guard, is exactly "selector is 6".
+pub fn evm_struct_hash_for(
+    c: &mut Circuit3,
+    manager: &B32<Public>,
+    p: &ExecutePayload<Public>,
+) -> B32<Public> {
+    c.region("eip712: struct hash", |c| {
+        let s1 = p.selector.eq(1u64).into_wire(c);
+        let s2 = p.selector.eq(2u64).into_wire(c);
+        let s3 = p.selector.eq(3u64).into_wire(c);
+        let s4 = p.selector.eq(4u64).into_wire(c);
+        let s5 = p.selector.eq(5u64).into_wire(c);
+        let is_withdraw = c.cond_select(s2, 1u64, s3);
+        let is_transfer = c.cond_select(s4, 1u64, s5);
+
+        let register = {
+            let pre = struct_hash_preimage_register(c, manager, p);
+            hash_struct_preimage(c, pre)
+        };
+        let withdraw = {
+            let a = b32_const(c, &WITHDRAW_SHIELDED_TYPE);
+            let b = b32_const(c, &WITHDRAW_UNSHIELDED_TYPE);
+            let t = B32::cond_select(c, s2, &a, &b);
+            let pre = struct_hash_preimage_withdraw(c, &t, manager, p);
+            hash_struct_preimage(c, pre)
+        };
+        let transfer = {
+            let a = b32_const(c, &TRANSFER_SHIELDED_TYPE);
+            let b = b32_const(c, &TRANSFER_UNSHIELDED_TYPE);
+            let t = B32::cond_select(c, s4, &a, &b);
+            let pre = struct_hash_preimage_transfer(c, &t, manager, p);
+            hash_struct_preimage(c, pre)
+        };
+        let swap = {
+            let pre = struct_hash_preimage_open_swap(c, manager, p);
+            hash_struct_preimage(c, pre)
+        };
+
+        // The fall-through assert: `!s1 && !(s2||s3) && !(s4||s5)` must mean selector 6.
+        let not_s1 = c.not(s1);
+        let not_wd = c.not(is_withdraw);
+        let not_tr = c.not(is_transfer);
+        let rest = c.cond_select(not_s1, not_wd, 0u64);
+        let rest = c.cond_select(rest, not_tr, 0u64);
+        c.when(rest, |c| {
+            c.assert(p.selector.eq(6u64).message("EIP-712 selector must be 1..6"));
+        });
+
+        // s1 ? register : (isWithdraw ? withdraw : (isTransfer ? transfer : swap))
+        let inner = B32::cond_select(c, is_transfer, &transfer, &swap);
+        let inner = B32::cond_select(c, is_withdraw, &withdraw, &inner);
+        B32::cond_select(c, s1, &register, &inner)
+    })
 }

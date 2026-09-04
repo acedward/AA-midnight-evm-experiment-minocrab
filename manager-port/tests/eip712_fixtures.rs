@@ -26,9 +26,9 @@ use minocrab_sim::v3::simulate;
 use minocrab_std::v3::{Bytes, Uint, B32};
 use minocrab_zkir::v3::IrValue;
 
+use manager_port::action_envelope::ExecutePayload;
+use manager_port::byte_codec::b32_const;
 use manager_port::eip712::*;
-use manager_port::payload::ExecutePayload;
-use manager_port::words::b32_const;
 
 // ---- fixture loading ---------------------------------------------------------------------------
 

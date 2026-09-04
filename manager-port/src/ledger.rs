@@ -1,5 +1,11 @@
 //! `manager.compact`'s `export ledger` block, as types.
 //!
+//! **No single Compact twin.** In the split contract the ledger block does not exist as one
+//! declaration: `AccountRegistry`, `ShieldedCustody` and `UnshieldedCustody` each declare the
+//! fields they own and the preset declares `deploymentDomain`, and the compiler concatenates them.
+//! This file is that concatenation, which is what minocrab needs and what the emitted `idx`
+//! immediates encode. The table below says which Compact file declares each field.
+//!
 //! **Declaration order IS the field index**, so this block must mirror the split contract's
 //! effective ledger order line for line — a reordering silently retargets every ledger operation
 //! in every ported circuit at the wrong slot. The compactc artifact encodes the index as an `idx`
@@ -86,7 +92,7 @@ pub mod slot {
     /// The Compact field names in ledger order — `ORDER[i]` is the field at index `i`.
     ///
     /// Written out (the field *names* are not recoverable from the handles), but pinned to the
-    /// derived indices by [`the_names_are_in_ledger_order`], so it cannot drift from the struct.
+    /// derived indices by `slot::the_names_are_in_ledger_order`, so it cannot drift from the struct.
     pub const ORDER: [&str; 8] = [
         "accounts",
         "accountModes",

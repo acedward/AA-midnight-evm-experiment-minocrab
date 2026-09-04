@@ -2,6 +2,16 @@
 //! the contract's only externally callable registration/debit gateway and 86.7% of its provable
 //! rows.
 //!
+//! **Compact twin**: `contracts/manager.compact` — THE PRESET, the deployable contract that
+//! composes the nine modules and owns the ledger field `deploymentDomain`, the constructor,
+//! `assertLiveDeadline` and `execute` itself.
+//!
+//! **Circuits ported here** (1 of the nine key-emitting circuits, and 86.7% of the provable rows):
+//! [`execute`]. The preset's other public wrappers — `depositShielded`, `depositUnshielded` and the
+//! six readers — are ported in the module that owns their state, because that is where their bodies
+//! are; [`crate::circuits`] is the list that says which file each of the nine lives in. The
+//! constructor is not ported: it emits no key.
+//!
 //! ## Why this circuit is hand-written instead of `#[circuit]`
 //!
 //! The compactc schema is 24 `Scalar<BLS12-381>` payload slots, then **two `Scalar<Secp256k1>`**
@@ -44,18 +54,12 @@ use minocrab_std::v3::{
     CircuitArg, Secp256k1EcdsaSignature, Uint, B32,
 };
 
+use crate::account_registry::{gateway_account, owner_commitment, register_account};
+use crate::action_envelope::{assert_action_envelope, ExecutePayload, Selectors};
+use crate::checks::b32_eq;
 use crate::custody::custody_dispatch;
-use crate::eip712::{
-    eip712_digest, evm_account_id_for, evm_domain_separator_for, hash_struct_preimage,
-    struct_hash_preimage_open_swap, struct_hash_preimage_register, struct_hash_preimage_transfer,
-    struct_hash_preimage_withdraw, TRANSFER_SHIELDED_TYPE, TRANSFER_UNSHIELDED_TYPE,
-    WITHDRAW_SHIELDED_TYPE, WITHDRAW_UNSHIELDED_TYPE,
-};
-use crate::envelope::{assert_action_envelope, gateway_account, Selectors};
-use crate::guards::{assert_live_deadline, b32_eq, owner_commitment, register_account};
+use crate::eip712::{evm_account_id_for, evm_digest_for};
 use crate::ledger::MANAGER;
-use crate::payload::ExecutePayload;
-use crate::words::b32_const;
 
 /// `export circuit execute(payload: ExecutePayload, sig: Secp256k1EcdsaSignature, pk: Secp256k1Point): []`
 pub fn execute() -> Compiled3 {
@@ -266,75 +270,28 @@ fn disclose_payload(c: &mut Circuit3, p: ExecutePayload<Private>) -> ExecutePayl
     }
 }
 
-/// `evmDigestFor(manager, domain, payload)` (`contracts/modules/Eip712.compact:201-207`) —
-/// `eip712Digest(evmDomainSeparatorFor(manager, domain), evmStructHashFor(manager, payload))`.
-fn evm_digest_for(
-    c: &mut Circuit3,
-    manager: &B32<Public>,
-    domain: &B32<Public>,
-    p: &ExecutePayload<Public>,
-) -> B32<Public> {
-    let sep = evm_domain_separator_for(c, manager, domain);
-    let sh = evm_struct_hash_for(c, manager, p);
-    eip712_digest(c, &sep, &sh)
-}
-
-/// `evmStructHashFor(manager, payload)` (`contracts/modules/Eip712.compact:158-192`).
+/// `assertLiveDeadline(validUntil)` (`contracts/manager.compact:310-327`). `execute` calls it inside
+/// `if (isEvmAuthorized)`, so the caller opens that scope and this body inherits it.
 ///
-/// A chain of `if (…) { return keccak(…); }` blocks: a circuit compiles every arm, so all four
-/// preimages are hashed and the answer is selected. The trailing
-/// `assert(p.selector == 6, "EIP-712 selector must be 1..6")` binds under the fall-through
-/// condition — which, combined with the caller's `selector != 0` guard, is exactly "selector is 6".
-fn evm_struct_hash_for(
-    c: &mut Circuit3,
-    manager: &B32<Public>,
-    p: &ExecutePayload<Public>,
-) -> B32<Public> {
-    c.region("eip712: struct hash", |c| {
-        let s1 = p.selector.eq(1u64).into_wire(c);
-        let s2 = p.selector.eq(2u64).into_wire(c);
-        let s3 = p.selector.eq(3u64).into_wire(c);
-        let s4 = p.selector.eq(4u64).into_wire(c);
-        let s5 = p.selector.eq(5u64).into_wire(c);
-        let is_withdraw = c.cond_select(s2, 1u64, s3);
-        let is_transfer = c.cond_select(s4, 1u64, s5);
+/// Three asserts in source order: the horizon is representable, the deadline is not further out
+/// than 3600 seconds, and it has not passed.
+pub fn assert_live_deadline(c: &mut Circuit3, valid_until: Uint<64, minocrab::Public>) {
+    c.assert(
+        valid_until
+            .gt(3600u64)
+            .message("EVM authorization deadline cannot satisfy the horizon"),
+    );
 
-        let register = {
-            let pre = struct_hash_preimage_register(c, manager, p);
-            hash_struct_preimage(c, pre)
-        };
-        let withdraw = {
-            let a = b32_const(c, &WITHDRAW_SHIELDED_TYPE);
-            let b = b32_const(c, &WITHDRAW_UNSHIELDED_TYPE);
-            let t = B32::cond_select(c, s2, &a, &b);
-            let pre = struct_hash_preimage_withdraw(c, &t, manager, p);
-            hash_struct_preimage(c, pre)
-        };
-        let transfer = {
-            let a = b32_const(c, &TRANSFER_SHIELDED_TYPE);
-            let b = b32_const(c, &TRANSFER_UNSHIELDED_TYPE);
-            let t = B32::cond_select(c, s4, &a, &b);
-            let pre = struct_hash_preimage_transfer(c, &t, manager, p);
-            hash_struct_preimage(c, pre)
-        };
-        let swap = {
-            let pre = struct_hash_preimage_open_swap(c, manager, p);
-            hash_struct_preimage(c, pre)
-        };
+    // `(validUntil - 3600) as Uint<64>` — Compact inserts an underflow guard before every `-`,
+    // and `sub_with` emits exactly that guard, in the same order, at the same width. The assert
+    // above already establishes the precondition, so the emitted guard is the same redundant-but-
+    // present check compactc emits.
+    let horizon = Uint::<64, minocrab::Public>::constant(c, 3600);
+    let earliest = valid_until.sub_with(c, horizon, "result of subtraction would be negative");
 
-        // The fall-through assert: `!s1 && !(s2||s3) && !(s4||s5)` must mean selector 6.
-        let not_s1 = c.not(s1);
-        let not_wd = c.not(is_withdraw);
-        let not_tr = c.not(is_transfer);
-        let rest = c.cond_select(not_s1, not_wd, 0u64);
-        let rest = c.cond_select(rest, not_tr, 0u64);
-        c.when(rest, |c| {
-            c.assert(p.selector.eq(6u64).message("EIP-712 selector must be 1..6"));
-        });
+    let gte = minocrab_std::v3::kernel::block_time_gte(c, earliest);
+    c.assert(is_true(gte).message("EVM authorization deadline exceeds 3600-second horizon"));
 
-        // s1 ? register : (isWithdraw ? withdraw : (isTransfer ? transfer : swap))
-        let inner = B32::cond_select(c, is_transfer, &transfer, &swap);
-        let inner = B32::cond_select(c, is_withdraw, &withdraw, &inner);
-        B32::cond_select(c, s1, &register, &inner)
-    })
+    let lt = minocrab_std::v3::kernel::block_time_lt(c, valid_until);
+    c.assert(is_true(lt).message("EVM authorization has expired"));
 }
