@@ -88,7 +88,7 @@ mkdir -p "$zkir_dir"
 cp "$zkir" "$zkir_dir/$zkir_base"
 chmod u+w "$zkir_dir/$zkir_base"
 
-watchdog_flag="$(mktemp -t minocrab-port-keygen-watchdog)"
+watchdog_flag="$(mktemp "${TMPDIR:-/tmp}/minocrab-port-keygen-watchdog.XXXXXX")"
 rm -f "$watchdog_flag"
 
 cleanup() {

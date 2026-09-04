@@ -70,6 +70,10 @@ jobs:
           rustup default 1.95.0
           cargo --version
           rustc --version
+          # The artifact gate's comparison half is a small Python script; every GitHub-hosted
+          # `ubuntu-*` image ships Python 3, and the version is printed so a future image change
+          # that dropped it would be legible in the log rather than a mystery failure later.
+          python3 --version
 
       # The git dependencies (minocrab and the midnight-ledger crates) dominate a cold build, so
       # the registry, the git checkouts and `target/` are all cached, keyed on the lockfile. A

@@ -55,7 +55,7 @@ if lsof -nP -iTCP:"$marker_port" -sTCP:LISTEN >/dev/null 2>&1 || \
   exit 98
 fi
 
-watchdog_flag="$(mktemp -t minocrab-port-measure-watchdog)"
+watchdog_flag="$(mktemp "${TMPDIR:-/tmp}/minocrab-port-measure-watchdog.XXXXXX")"
 rm -f "$watchdog_flag"
 
 cleanup() {

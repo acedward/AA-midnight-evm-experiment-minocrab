@@ -118,9 +118,13 @@ if [ -n "$contract_dir" ]; then
   echo "CONTRACT_DIR=$contract_dir"
   # `bash 3.2` (what macOS ships) mis-parses a quoted prefix inside `${var#...}`, so the path is
   # trimmed with sed rather than with parameter expansion.
+  # `shasum` is Perl's and ships on macOS; `sha256sum` is coreutils' and ships on Linux. Both print
+  # `<digest>  <path>`, so either will do and this script needs neither to be present.
+  sha256_cmd="shasum -a 256"
+  command -v shasum >/dev/null 2>&1 || sha256_cmd="sha256sum"
   contract_files="$(
-    { shasum -a 256 "$contract_dir/manager.compact"
-      shasum -a 256 "$contract_dir"/modules/*.compact
+    { $sha256_cmd "$contract_dir/manager.compact"
+      $sha256_cmd "$contract_dir"/modules/*.compact
     } | awk '{ h = $1; $1 = ""; sub(/^ +/, ""); print $0 " " h }' \
       | sed "s|^$contract_dir/||"
   )"
@@ -136,7 +140,10 @@ if [ -n "$zkir_dir" ]; then
   zkir_dir="$(cd "$zkir_dir" && pwd)"
   echo "REUSING=$zkir_dir"
 else
-  work="$(mktemp -d -t minocrab-port-artifacts)"
+  # `mktemp -t NAME` is BSD; GNU coreutils needs a template ending in XXXXXX and errors out
+  # with "too few X's in template" otherwise. This spelling works on both, which matters
+  # because this script is the one CI runs.
+  work="$(mktemp -d "${TMPDIR:-/tmp}/minocrab-port-artifacts.XXXXXX")"
   zkir_dir="$work/port-zkir"
   toolchain_arg=()
   if [ -n "${CARGO_TOOLCHAIN-1.95.0}" ]; then

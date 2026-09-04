@@ -58,7 +58,7 @@ fi
 rm -rf "$out_dir"
 mkdir -p "$out_dir"
 
-watchdog_flag="$(mktemp -t minocrab-port-compile-watchdog)"
+watchdog_flag="$(mktemp "${TMPDIR:-/tmp}/minocrab-port-compile-watchdog.XXXXXX")"
 rm -f "$watchdog_flag"
 
 cleanup() {
