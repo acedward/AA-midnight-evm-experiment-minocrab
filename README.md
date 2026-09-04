@@ -280,6 +280,95 @@ cost, with the compiler held still.
 | + PR #9 `safeGive` clamp | 211,039 | **+11** |
 | + PR #10 recipient tag & envelope guards | **211,056** | **+17** |
 
+## Releases
+
+The port ships no compiled output in the git tree — but a deployment needs a **verifier key for
+every exported circuit** at deploy time and a **prover key for every circuit it proves**, and
+regenerating those means the pinned compactc archive, the Midnight SRS for each circuit's `k`, and
+about a minute of keygen. So they are published instead, identified by SHA-256:
+
+| what | files |
+|---|---|
+| the emitted IR | `<circuit>.zkir` |
+| the binary IR `zkir-v3` derives from it | `<circuit>.bzkir` |
+| the proving key | `<circuit>.prover` |
+| the verifying key | `<circuit>.verifier` |
+| the hashes of all 37 other files | `SHA256SUMS` |
+| every pin the assets were built from | `manifest.json` |
+
+Nine circuits × 4 + 2 = **38 files, 695,875,593 B (663.6 MiB)**, of which `execute.prover` alone is
+544 MiB. Individual files rather than an archive, deliberately: a consumer that needs three
+kilobytes of verifier key should not download two thirds of a gigabyte to get it, and each file
+should be checkable on its own. `hello_positive_amount` is a bring-up smoke circuit, not part of
+the contract's provable surface, and is not published.
+
+### Using one
+
+```bash
+gh release download v0.2.0 --repo acedward/AA-midnight-evm-experiment-minocrab \
+    --pattern 'SHA256SUMS' --pattern 'manifest.json' \
+    --pattern 'execute.verifier' --pattern 'execute.prover'
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+`SHA256SUMS` covers **every file in the release except itself**, `manifest.json` included, so the
+only thing you have to trust out-of-band is one 3 KB file. `manifest.json` then tells you what the
+keys actually are: the commit, the `minocrab` rev, the contract pin and all ten contract-file
+hashes, the compactc archive and `zkir-v3` SHA-256, the SRS used for each `k`, and every circuit's
+`k`, rows, sizes and hashes. Those are the *identity* of a key, not decoration — the same `.zkir`
+keyed by a different `zkir-v3`, or against a different SRS, is a different key.
+
+If you already have the keys and want to check them against this repository rather than against a
+downloaded `SHA256SUMS`:
+
+```bash
+scripts/check-port-artifacts.sh --no-toolchain-check --with-keys <dir-of-keys>
+#   -> PORT ARTIFACT GATE OK — 10 circuit(s), every size and hash identical, plus 18 key file(s)
+```
+
+### How a release is made
+
+`scripts/release-artifacts.sh` produces all 38 files and **refuses to produce a release at all** if
+anything it can check has moved: every emitted `.zkir` against `fixtures/port-artifact-hashes.json`,
+every SRS against `fixtures/srs-hashes.json`, each circuit's `k` against the one recorded next to
+its SRS, the `zkir-v3` binary against `scripts/toolchain.sh`'s pin, and — the point of the whole
+exercise — the recorded prover and verifier hashes themselves. A tag whose keygen produced
+different bytes than the ones in this README fails instead of publishing.
+
+```bash
+scripts/release-artifacts.sh --out generated/release       # fetches the SRS on first use
+sha256sum -c generated/release/SHA256SUMS
+```
+
+It runs `zkir-v3` natively where it can (arm64 Linux — the pinned archive's binary is a static
+executable) and in the pinned Docker image everywhere else. **Both produce byte-identical output:**
+measured on this snapshot, macOS/arm64 through Docker and Linux/arm64 running the binary natively
+agree on all 38 hashes, `manifest.json` and `SHA256SUMS` included. That is possible only because
+`manifest.json` carries no timestamp, no hostname and no wall-clock or memory figure — it is a
+statement about artifact identity, and an identity must not depend on which machine produced it.
+
+`.github/workflows/release.yml` does this on `ubuntu-24.04-arm`. `workflow_dispatch` is a dry run:
+it builds everything, checks every hash, prints `SHA256SUMS` and `manifest.json` into the job
+summary, and publishes nothing — it holds no write permission at all. Pushing a tag `v*` runs the
+same build and then `gh release create`, with the body generated from `manifest.json` by
+`scripts/release-notes.py` so the release page cannot drift from the files.
+
+### Tags
+
+`v0.2.0` is the first release. `v0.1.0` is left unused on purpose: the earlier
+MinoCrab `6a53f2b` / contract `713a202` state was published as a README and never as a release, and
+giving it a tag now would invent a history. The tag name carries no information anyway — every pin
+is in `manifest.json`.
+
+### One thing to be clear about before you deploy these
+
+The `execute` circuit these keys are for is **tested-equivalent to the Compact contract at the
+pinned commit, not proven equivalent**. The differential suite compares this port against the
+`compactc` artifact circuit by circuit and run by run — 59 tests, 26 scenarios, 5,128 tamper probes,
+0 acceptance disagreements — which is evidence, and evidence is not a proof.
+[§ What "equivalent" was tested to mean](#what-equivalent-was-tested-to-mean) says exactly what was
+and was not established, and [§ Caveats](#caveats) carries the BREAKING slot-order note.
+
 ## Regenerating the artifacts
 
 Emission is deterministic. From a clean clone:
@@ -409,6 +498,11 @@ image exits 70 instead of silently re-baselining.
 `keygen-zkir.sh` runs `zkir-v3 compile` rather than `compactc` deliberately: a MinoCrab artifact has
 no `.compact` source at all, so keying it from the raw ZKIR is the only route — and it means both
 artifacts are keyed by the *identical* tool, in the identical image, under identical bounds.
+
+It keys **one** circuit and refuses to overwrite an existing result, which is what you want while
+measuring. To key all nine at once, gate every hash and produce a publishable set, use
+`scripts/release-artifacts.sh` instead ([§ Releases](#releases)) — it drives the same
+`zkir-v3 compile`, so the two agree by construction.
 
 ### Proving and verifying
 
@@ -666,6 +760,12 @@ A byte change with a green differential suite is a legitimate re-record; a byte 
 explanation is a bug. CI can only ever see the first half of that sentence, so a green badge here
 is not a claim of equivalence — [§ What "equivalent" was tested to mean](#what-equivalent-was-tested-to-mean)
 is.
+
+`.github/workflows/release.yml` is the second workflow, and it answers a third question — *are
+the published keys the ones this repository documents?* It runs only on demand or on a tag, on
+`ubuntu-24.04-arm` where the pinned `zkir-v3` runs natively, and it re-derives every asset and
+every hash before it uploads anything ([§ Releases](#releases)). It is not part of the push gate:
+it costs a minute of keygen and 664 MB, and nothing about it needs to run on a branch.
 
 CI therefore also serves as the port's only **cross-platform** check: every number in this README
 was measured on `aarch64-apple-darwin`, and the artifact gate re-emitting identically on another
