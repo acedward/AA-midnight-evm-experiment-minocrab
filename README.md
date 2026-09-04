@@ -51,20 +51,54 @@ against exactly what was measured.
 ## Layout
 
 ```
-manager-port/          the port: one module per circuit family, plus the differential suite
-  src/                   circuits — envelope, custody, coins, deposits, eip712, execute, queries…
+manager-port/          the port: ONE MODULE PER COMPACT MODULE (see below), plus the equivalence gate
+  src/                   the transcription — one file per contracts/modules/*.compact
   src/bin/emit_zkir.rs   emits one <circuit>.zkir per circuit into a directory
-  tests/                 the equivalence gate (see below)
+  tests/                 the equivalence gate (see § Running the differential suite)
 prove-bench/           compiler-neutral keygen/prove/verify harness — links NO minocrab code, so
                        neither compiler's tooling is ever on the timing path
-scripts/               toolchain (the compactc pin) · compile (compactc baseline) · measure
-                       (k, rows) · keygen · check-port-artifacts (the emitted-ZKIR gate) ·
-                       check-refs (resolves every `contracts/…compact:NNN` citation) · helpers
+scripts/               toolchain (the compactc pin) · compile-baseline (the compactc artifact) ·
+                       measure-zkir (k, rows) · keygen-zkir · check-port-artifacts (the emitted-ZKIR
+                       gate) · check-refs (resolves every `contracts/…compact:NNN` citation) ·
+                       free-port · decode-impact · diff-ledger-events
 docker/                compactc.Dockerfile — the pinned toolchain, built from a SHA-256-pinned
                        release archive, so the reference side needs no private image
 fixtures/eip712/       the frozen EIP-712 test-vector set (see § Vendored fixtures)
 fixtures/port-artifact-hashes.json   the expected-hash table below, in machine form
+.github/workflows/ci.yml   build · tests · `cargo fmt --check` · the artifact gate (see § CI)
 ```
+
+### One Rust module per Compact module
+
+The contract is a **preset plus nine modules**, and this crate carries the same names, so a reader
+moving between the two repositories opens the file with the same name and finds the same circuits.
+
+| Compact | here | key-emitting circuits it holds |
+|---|---|---|
+| `contracts/manager.compact` (the preset) | `src/execute.rs` | `execute` |
+| `contracts/modules/AccountRegistry.compact` | `src/account_registry.rs` | `isRegistered`, `accountRecord` |
+| `contracts/modules/ShieldedCustody.compact` | `src/shielded_custody.rs` | `shieldedAccountBalance`, `poolValue`, `poolHasColour` |
+| `contracts/modules/UnshieldedCustody.compact` | `src/unshielded_custody.rs` | `unshieldedAccountBalance` |
+| `contracts/modules/Custody.compact` | `src/custody.rs` | `depositShielded`, `depositUnshielded` |
+| `contracts/modules/ActionEnvelope.compact` | `src/action_envelope.rs` | — (pure: `ExecutePayload` + the envelope asserts) |
+| `contracts/modules/Eip712.compact` | `src/eip712.rs` | — (pure: the frozen bytes) |
+| `contracts/modules/ByteCodec.compact` | `src/byte_codec.rs` | — (pure: where the row win is) |
+| `contracts/modules/ZswapPrimitives.compact` | `src/zswap_primitives.rs` | — (pure: recipes over the kernel) |
+| `contracts/modules/SemanticCommitment.compact` | **no counterpart** | — (not ported) |
+
+`SemanticCommitment` is not ported: it is pure, emits no key, and is not among the nine provable
+circuits, so there is nothing for the differential suite to compare. Four Rust modules have no
+Compact twin and say so in their own headers: `ledger.rs` (the slot table — in Compact the block
+does not exist as one declaration; the four state-owning modules each declare their fields and the
+compiler concatenates them), `checks.rs` (predicates Compact expresses as syntax),
+`disclosures.rs` (one type per `disclose(…)` label, which Compact expresses as the argument's name)
+and `hello.rs` (a bring-up scaffold).
+
+The mapping is **not** one-to-one on every function. Where a Compact internal only ever runs inside
+`custodyDispatch` — `_credit`, `_writeCell`, `_pooled`, `_sendNamed`, `_releaseOpen`, `_claimWant`,
+`_give` — it is inlined there rather than given a Rust function of its own, because the emitted op
+stream is what has to match and inlining is what compactc does. Each is cited at its point of use,
+and every module header states which of its twin's circuits it holds and which it does not.
 
 ## Pins
 
@@ -72,8 +106,8 @@ Every number below was measured at exactly these pins. They are not suggestions.
 
 | thing | pin |
 |---|---|
-| **MinoCrab** | [`sig-net/minocrab`][minocrab] @ `1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9` (upstream `main`, 2026-09-02) — **unaudited third party**. Previous pin `6a53f2b54850955406cd0f45dd78cc1e152182c7`; what the move cost is in [§ MinoCrab pin history](#minocrab-pin-history) |
-| **Rust** | `cargo` / `rustc` **1.95.0** (`aarch64-apple-darwin`). 1.92 and below do not build this workspace: `sysinfo@0.39.6` declares `rust-version = "1.95"` and arrives through `midnight-storage`, i.e. through the `midnight-ledger` rev minocrab pins. minocrab's own workspace floor is `rust-version = "1.85"`; 1.95.0 is what the dependency graph actually requires, re-checked at `1522f9d` |
+| **MinoCrab** | [`sig-net/minocrab`][minocrab] @ `1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9` (upstream `main`, 2026-09-02) — **unaudited third party**. Previous pin `6a53f2b54850955406cd0f45dd78cc1e152182c7`; what the move cost is in [§ MinoCrab pin history](#minocrab-pin-history). **Note**: at this rev upstream carries a port of this same contract in its own corpus (`crates/minocrab-contracts/src/manager.rs`, over the 1,420-line pre-split source). That is a **different, semantic** port with its own goals; this repository does not use it, depend on it, or compare against it. Do not read a number from one as a number about the other |
+| **Rust** | `cargo` / `rustc` **1.95.0**. Every number here was measured on `aarch64-apple-darwin`; the emitted ZKIR is also reproduced on `aarch64-unknown-linux-gnu` (§ CI). 1.92 and below do not build this workspace: `sysinfo@0.39.6` declares `rust-version = "1.95"` and arrives through `midnight-storage`, i.e. through the `midnight-ledger` rev minocrab pins. minocrab's own workspace floor is `rust-version = "1.85"`; 1.95.0 is what the dependency graph actually requires, re-checked at `1522f9d` |
 | **Contract ported** | [`contracts/manager.compact`][contract] @ [`41de69ded41ff933fe0db8697b264dc46fc6e0cb`][pin] — since the product's module split this is a **398-line preset plus nine modules**, and the port transcribes all ten files; the per-file hashes are below. Previous pin `713a20215f33e02904ea5bd699b7de7f76562e1b` (one 1,420-line file, sha256 `164cf112…`); what the move cost is in [§ Contract pin history](#contract-pin-history) |
 | **Reference compiler** | **Compact 0.34.0** / language 0.26.0 / runtime 0.19.0 / `--feature-zkir-v3`, the toolchain the product repository pins on `main`. Obtained and hash-verified by `scripts/toolchain.sh`, which builds `docker/compactc.Dockerfile` from release archive `compactc_v0.34.0_aarch64-unknown-linux-musl.zip` (sha256 `d3e292c4f48e257dcd6b3d3e3e4743d7d8ea0729f48953eab91a366d44cd026d`) — arm64. The verified binaries are `compactc.bin` `628b343f9b0ebe32e6e6a141b6f73cc66edb19c516a4817b478c3b47f74230d5` and `zkir-v3` `6a91308419d24bc0633210897d10c7c1b2193444e8bde09ce763e9556cb8f93a`. See the history note below |
 | **Keygen tool** | `zkir-v3 compile` (`/opt/compactc/zkir-v3`), from that same image |
@@ -138,10 +172,12 @@ cargo +1.95.0 test  --release --locked
 ```
 
 That is the whole setup — no side-by-side checkout, no vendoring: minocrab is a pinned **git**
-dependency. The default test run is **10 tests** — 8 in-crate assertions that each circuit's
-*declared* disclosures are exactly the ones it makes, plus the 2 EIP-712 fixture tests — and needs
-nothing that is not in this repository. The three differential test targets need a `compactc`
-baseline artifact and are feature-gated off; see
+dependency. The default test run is **13 tests**: 8 in-crate assertions that each circuit's
+*declared* disclosures are exactly the ones it makes, 3 that pin the ledger slot table (the derived
+indices against the struct, the order against the split contract, and the pooled-coin read view
+against the write view — see [§ Contract pin history](#contract-pin-history) for why those exist),
+and the 2 EIP-712 fixture tests. None of them needs anything that is not in this repository. The
+three differential test targets need a `compactc` baseline artifact and are feature-gated off; see
 [§ Running the differential suite](#running-the-differential-suite).
 
 ## Measured results
@@ -213,16 +249,29 @@ Three things must travel with those numbers:
 3. **Absolute seconds are machine-relative and the host was not idle.** Treat the *ratio* as the
    transferable number.
 
-### What the three contract fixes cost `execute`
+### History: what each change cost `execute`
+
+Three things have moved this circuit since the port was first published, and each was isolated and
+measured on its own rather than inferred from the total. Read in order:
+
+| # | change | rows | Δ | where |
+|---|---|---:|---:|---|
+| 0 | the port, as first published (MinoCrab `6a53f2b`, contract `713a202`) | 211,056 | — | the table below |
+| 1 | Compact toolchain 0.33.0 → 0.34.0 | 211,056 | **±0** | [§ Pins](#pins) — no tool delta at all: same k, same rows, byte-identical `.bzkir` for all nine |
+| 2 | MinoCrab `6a53f2b` → `1522f9d` | 211,059 | **+3** | [§ MinoCrab pin history](#minocrab-pin-history) |
+| 3 | contract `713a202` → `41de69d` (the module split) | **211,047** | **−12** | [§ Contract pin history](#contract-pin-history) |
+
+**k = 18 throughout.** Nothing in the § Proving table moves, because `k` is what proving time and
+key size are a function of.
+
+#### The three contract fixes that produced row 0
 
 Each change set was applied cumulatively to the port, re-emitted, and re-measured with the same
 oracle — measured, not estimated. (The crate was then restored and re-emits `execute.zkir`
 byte-identically, which is what makes the intermediate numbers safe to publish.)
 
-All four rows are MinoCrab `6a53f2b` / contract `713a202` measurements — the statement's cost, with
-the compiler held still. They are history: at the current pins the same circuit is 211,047. See
-[§ MinoCrab pin history](#minocrab-pin-history) for the compiler's +4 and
-[§ Contract pin history](#contract-pin-history) for the split's −12.
+All four rows below are MinoCrab `6a53f2b` / contract `713a202` measurements — the statement's
+cost, with the compiler held still.
 
 | cumulative statement | rows | Δ |
 |---|---:|---:|
@@ -404,14 +453,18 @@ product repository recorded for the same commit.
 `41de69d` — the split contract, preset plus nine modules:
 
 * **Typed schema identity** — input types in order, output types, communications-commitment flag.
-* **`pi_skips` equality entry by entry over all 404 Impact instructions**, on every scenario. Two
-  artifacts can agree here only if they emit the same ledger operations, in the same order, with the
-  same input counts and the same guard truth values.
+* **`pi_skips` equality entry by entry over all 404 Impact instructions** of `execute`, on every
+  scenario (and over each other circuit's own count: 90 for `depositShielded`, 37 for
+  `accountRecord`, 5 for `poolHasColour`, …). Two artifacts can agree here only if they emit the
+  same ledger operations, in the same order, with the same input counts and the same guard truth
+  values.
 * **Public-input-vector equality element by element** on a shared `ProofPreimage` (1,265 elements),
   with upstream's own `Zkir::check()` agreeing with the simulation on both sides.
-* **11 accepted scenarios covering all seven `execute` selectors**, with a single-element tamper
-  sweep across the whole preimage and **0 acceptance disagreements** — every mutation is accepted
-  or rejected identically by both artifacts.
+* **26 accepted scenarios** — 11 covering all seven `execute` selectors plus every
+  selector-independent arm of the mux, and 15 across the other eight circuits — each with a
+  single-element tamper sweep over its whole preimage: **5,128 probes, 0 acceptance
+  disagreements** (plus 19 more on `isRegistered`'s own sweep). Every mutation is accepted or
+  rejected identically by both artifacts.
 * **The ledger slot table is derived, not asserted.** `manager-port/src/ledger.rs` is the one place
   a field index is written down; the harnesses' VM transcripts, pre-state arrays and post-state
   assertions read it out of `#[derive(Ledger)]`'s own paths (`ledger::slot`), and two unit tests
@@ -425,8 +478,8 @@ product repository recorded for the same commit.
   `ResultModeVerify` against a constructed pre-state. Every `Popeq` is checked against real state,
   and the post-state and `Effects` are asserted.
 * **The EIP-712 chain** — domain separator, struct hash and digest — byte-compared against the
-  frozen fixture set on every case. These are pure circuits with no proving key, so they get a
-  stricter bar: the bytes are what a MetaMask signature commits to.
+  frozen fixture set: **60 cases, 180 byte comparisons**. These are pure circuits with no proving
+  key, so they get a stricter bar: the bytes are what a MetaMask signature commits to.
 
 What this does **not** establish: a formal proof of statement equivalence, or any claim about
 MinoCrab's correctness in general. It is a strong *empirical* gate on **this** circuit against
@@ -558,6 +611,40 @@ upstream code as before. The `Cargo.lock` change is the eight `minocrab-*` packa
 new internal edge (`minocrab-sim` now also depends on `minocrab-ir`) — 397 packages before and
 after, no other version moved.
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request, on `ubuntu-24.04`, and does four
+things: `cargo fmt --all -- --check`, `cargo build --release --locked`,
+`cargo test --release --locked` (the default targets), and
+`scripts/check-port-artifacts.sh --no-toolchain-check`. Cargo's registry, git checkouts and
+`target/` are cached on `Cargo.lock`.
+
+**It does not run the differential suite, and that is deliberate.** The suite's `compactc` baseline
+is a compiled file that is not in this repository and cannot be: reproducing it needs the pinned
+Compact toolchain in Docker plus a checkout of the product repository. So the division of labour is:
+
+| | question it answers |
+|---|---|
+| CI | did the emitted **bytes** change, and does the crate still build and pass its own tests? |
+| the local suite | is the **statement** still equivalent to the contract? |
+
+A byte change with a green differential suite is a legitimate re-record; a byte change with no
+explanation is a bug. CI can only ever see the first half of that sentence, so a green badge here
+is not a claim of equivalence — [§ What "equivalent" was tested to mean](#what-equivalent-was-tested-to-mean)
+is.
+
+CI therefore also serves as the port's only **cross-platform** check: every number in this README
+was measured on `aarch64-apple-darwin`, and the artifact gate re-emitting identically on another
+platform is what says the hashes are a property of the crate rather than of one laptop. That was
+verified before this workflow was added — a clean clone, built and gated in a Linux container on
+`aarch64-unknown-linux-gnu`, emits **all ten `.zkir` files byte-identically** to the macOS record
+and passes `cargo fmt --check`, the default tests and the artifact gate. `x86_64` is what the
+workflow itself confirms.
+
+(That exercise paid for itself immediately: it is how `mktemp: too few X's in template` was found —
+`mktemp -t NAME` is BSD's spelling and GNU coreutils rejects it, so the gate would have failed on
+CI's very first run, before emitting anything.)
+
 ## Caveats
 
 1. **EXPERIMENTAL — emitted by an unaudited third-party compiler.** MinoCrab is pre-1.0 and
@@ -570,13 +657,22 @@ after, no other version moved.
    integrity mode requires one. A proof server or client must either be configured with a
    relaxed/disabled integrity check, or be supplied with a manifest. This is an integration cost of
    the raw-ZKIR keying route — it would affect *either* compiler taking that route — not a defect in
-   the artifact: the keys are valid and were used to produce and verify 7 real proofs.
+   the artifact: the keys are valid and have been used to produce and verify real proofs (7 of 7 at
+   the previous pins, 1 of 1 as a smoke on the current pair).
 4. **Verification is ~2.3 ms slower** on the port, consistently. At ~10 ms either way this is
    practically irrelevant, but it is the one column that moves the wrong way.
 5. **The row win does not generalise by percentage.** It is a byte-chain result; see the note under
    [§ Rows and `k`](#rows-and-k).
 6. **Pin drift is the failure mode.** If a regenerated hash differs, suspect a moved rev before
-   anything else.
+   anything else — the gate prints the recorded `minocrab` rev next to the observed one for exactly
+   that reason.
+7. **The ledger slot order is BREAKING against artifacts from before contract `41de69d`**, and a
+   contract deployed from those must be redeployed. See the notice at the top and
+   [§ Contract pin history](#contract-pin-history).
+8. **The proving table was measured at the previous pins** (`6a53f2b` / `713a202`) and is labelled
+   as such wherever it appears. `k` has not moved, which is what makes it transferable, and a
+   single-scenario smoke on the current keys is consistent with it — but it is not a fresh full
+   run.
 
 ## Vendored fixtures
 
