@@ -163,6 +163,9 @@ echo "PARAMS_DIR=$params_dir"
 # A real tag must describe a tree that exists. A dry run may be as dirty as you like.
 if [ "$tag" != "unreleased" ] && [ "$git_dirty" -ne 0 ]; then
   echo "REFUSING: --tag $tag with a dirty working tree — the assets would not correspond to $git_commit." >&2
+  echo "An UNTRACKED file counts: a new source file changes what emit-zkir emits just as surely as" >&2
+  echo "a modified one. What is dirty:" >&2
+  git -C "$repo_root" status --porcelain | sed 's/^/  /' >&2
   exit 96
 fi
 
