@@ -280,6 +280,95 @@ cost, with the compiler held still.
 | + PR #9 `safeGive` clamp | 211,039 | **+11** |
 | + PR #10 recipient tag & envelope guards | **211,056** | **+17** |
 
+## Releases
+
+The port ships no compiled output in the git tree — but a deployment needs a **verifier key for
+every exported circuit** at deploy time and a **prover key for every circuit it proves**, and
+regenerating those means the pinned compactc archive, the Midnight SRS for each circuit's `k`, and
+about a minute of keygen. So they are published instead, identified by SHA-256:
+
+| what | files |
+|---|---|
+| the emitted IR | `<circuit>.zkir` |
+| the binary IR `zkir-v3` derives from it | `<circuit>.bzkir` |
+| the proving key | `<circuit>.prover` |
+| the verifying key | `<circuit>.verifier` |
+| the hashes of all 37 other files | `SHA256SUMS` |
+| every pin the assets were built from | `manifest.json` |
+
+Nine circuits × 4 + 2 = **38 files, 695,875,593 B (663.6 MiB)**, of which `execute.prover` alone is
+544 MiB. Individual files rather than an archive, deliberately: a consumer that needs three
+kilobytes of verifier key should not download two thirds of a gigabyte to get it, and each file
+should be checkable on its own. `hello_positive_amount` is a bring-up smoke circuit, not part of
+the contract's provable surface, and is not published.
+
+### Using one
+
+```bash
+gh release download v0.2.0 --repo acedward/AA-midnight-evm-experiment-minocrab \
+    --pattern 'SHA256SUMS' --pattern 'manifest.json' \
+    --pattern 'execute.verifier' --pattern 'execute.prover'
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+`SHA256SUMS` covers **every file in the release except itself**, `manifest.json` included, so the
+only thing you have to trust out-of-band is one 3 KB file. `manifest.json` then tells you what the
+keys actually are: the commit, the `minocrab` rev, the contract pin and all ten contract-file
+hashes, the compactc archive and `zkir-v3` SHA-256, the SRS used for each `k`, and every circuit's
+`k`, rows, sizes and hashes. Those are the *identity* of a key, not decoration — the same `.zkir`
+keyed by a different `zkir-v3`, or against a different SRS, is a different key.
+
+If you already have the keys and want to check them against this repository rather than against a
+downloaded `SHA256SUMS`:
+
+```bash
+scripts/check-port-artifacts.sh --no-toolchain-check --with-keys <dir-of-keys>
+#   -> PORT ARTIFACT GATE OK — 10 circuit(s), every size and hash identical, plus 18 key file(s)
+```
+
+### How a release is made
+
+`scripts/release-artifacts.sh` produces all 38 files and **refuses to produce a release at all** if
+anything it can check has moved: every emitted `.zkir` against `fixtures/port-artifact-hashes.json`,
+every SRS against `fixtures/srs-hashes.json`, each circuit's `k` against the one recorded next to
+its SRS, the `zkir-v3` binary against `scripts/toolchain.sh`'s pin, and — the point of the whole
+exercise — the recorded prover and verifier hashes themselves. A tag whose keygen produced
+different bytes than the ones in this README fails instead of publishing.
+
+```bash
+scripts/release-artifacts.sh --out generated/release       # fetches the SRS on first use
+sha256sum -c generated/release/SHA256SUMS
+```
+
+It runs `zkir-v3` natively where it can (arm64 Linux — the pinned archive's binary is a static
+executable) and in the pinned Docker image everywhere else. **Both produce byte-identical output:**
+measured on this snapshot, macOS/arm64 through Docker and Linux/arm64 running the binary natively
+agree on all 38 hashes, `manifest.json` and `SHA256SUMS` included. That is possible only because
+`manifest.json` carries no timestamp, no hostname and no wall-clock or memory figure — it is a
+statement about artifact identity, and an identity must not depend on which machine produced it.
+
+`.github/workflows/release.yml` does this on `ubuntu-24.04-arm`. `workflow_dispatch` is a dry run:
+it builds everything, checks every hash, prints `SHA256SUMS` and `manifest.json` into the job
+summary, and publishes nothing — it holds no write permission at all. Pushing a tag `v*` runs the
+same build and then `gh release create`, with the body generated from `manifest.json` by
+`scripts/release-notes.py` so the release page cannot drift from the files.
+
+### Tags
+
+`v0.2.0` is the first release. `v0.1.0` is left unused on purpose: the earlier
+MinoCrab `6a53f2b` / contract `713a202` state was published as a README and never as a release, and
+giving it a tag now would invent a history. The tag name carries no information anyway — every pin
+is in `manifest.json`.
+
+### One thing to be clear about before you deploy these
+
+The `execute` circuit these keys are for is **tested-equivalent to the Compact contract at the
+pinned commit, not proven equivalent**. The differential suite compares this port against the
+`compactc` artifact circuit by circuit and run by run — 59 tests, 26 scenarios, 5,128 tamper probes,
+0 acceptance disagreements — which is evidence, and evidence is not a proof.
+[§ What "equivalent" was tested to mean](#what-equivalent-was-tested-to-mean) says exactly what was
+and was not established, and [§ Caveats](#caveats) carries the BREAKING slot-order note.
+
 ## Regenerating the artifacts
 
 Emission is deterministic. From a clean clone:
@@ -326,8 +415,9 @@ The prover key is 196 bytes smaller than the one the first published snapshot re
 (570,484,400): key size tracks k *almost* entirely, but not exactly, so it is re-recorded rather
 than carried forward. The verifier key stays 3,321 B.
 
-The other eight circuits (`.bzkir` is what `zkir-v3 mock-compile` writes; no keys were generated
-for these — only `execute` was at k = 19):
+The other eight circuits. `.bzkir` is what `zkir-v3` derives from the `.zkir`; `mock-compile` and
+`compile` write the same bytes, measured — every hash in this column came out of a `mock-compile`
+in 00028 and out of a `compile` in 00029, and all eight agree:
 
 | circuit | `.zkir` bytes | `.zkir` SHA-256 | `.bzkir` bytes | `.bzkir` SHA-256 |
 |---|---:|---|---:|---|
@@ -339,6 +429,39 @@ for these — only `execute` was at k = 19):
 | `poolValue` | 1,632 | `9aeab69ad730f80f747e0fedd5a5301be0e8b7367db6f99af47275366a40dad3` | 555 | `ad012dd0726153e99d045710fafc0deb6ba1525fd99e78b4081926325b605b45` |
 | `isRegistered` | 786 | `25eaf82d9391232e00ce0c15e95cbaf004f7acb59d82827c7429be08328bcb0f` | 263 | `4da9bbd859ca5d42bccfb02951466d010ef24df0f1e22a149e76bac5057e114d` |
 | `poolHasColour` | 792 | `55c30b8add242f7093c2e40e2124d02a9f4f3a9d19259736ab142a3ebd7d0709` | 269 | `4616eb019c61c17693aa5ac0cc1a1c30c5216ed1d48ecf51d049ccc1995ed054` |
+
+#### Proving and verifying keys, all nine circuits
+
+Keying is what `execute` alone used to have. Since 00029 every circuit a deployment needs is keyed
+and published: a deployment registers a verifier key for **every exported circuit** at deploy time,
+so eight verifier keys that exist on one laptop and nowhere else are eight keys a consumer cannot
+get. All nine below are generated by `scripts/release-artifacts.sh`, which gates every hash on this
+table and refuses to produce a release if one moves — and they are published as release assets
+([§ Releases](#releases)).
+
+| circuit | k | rows | SRS | `.prover` bytes | `.prover` SHA-256 | `.verifier` bytes | `.verifier` SHA-256 |
+|---|---:|---:|---|---:|---|---:|---|
+| `execute` | 18 | 211,047 | `bls_midnight_2p18` | 570,484,204 | `eb4405382ba8dd2fc86434410f284db3493e804148ce7b0e3d54952d1a5db5a9` | 3,321 | `13096f6f22344b264d85b86af2da811f797cce55e76d085e0185eb81bc359b60` |
+| `depositShielded` | 16 | 42,256 | `bls_midnight_2p16` | 90,187,617 | `f7a255255383a6f890f131163a1a5671e719ecc341c1bda47ed8af449af0eaea` | 2,121 | `1cd0429b671a1b036572b5f141c499d44ca578463d5761e6c72e447395b9ccb8` |
+| `depositUnshielded` | 13 | 7,917 | `bls_midnight_2p13` | 11,278,219 | `cc4a2cf42e279f67268250aec376fe10e1664124213bd2e5ad0e7fd2e840f0d3` | 2,121 | `e124ec54677b06ca1a89f434da28cf8e2105c71ca00edce947c1d99bd4336ff9` |
+| `shieldedAccountBalance` | 13 | 4,000 | `bls_midnight_2p13` | 11,277,172 | `87200767a2d22c8ed0800571bd9e368ca8c0904b6fe17fee49edb51eb9a7af80` | 2,121 | `9079e1e4d2c1c6216e6b796793cea060508e2bb81362d8b846afbbc90a7ecb3e` |
+| `unshieldedAccountBalance` | 13 | 4,000 | `bls_midnight_2p13` | 11,277,176 | `ad24ef7e8ec120121165d9b1e8b779e95df70c9fc6a12c80e35718a219eb3ad8` | 2,121 | `f2831ba26b343aedaccf0dc55e45e1efd81a34789aa48409a492651afb8a6649` |
+| `accountRecord` | 9 | 332 | `bls_midnight_2p9` | 447,566 | `1bbc116fed749d73fd353fe0dbc63a7246f19eb6cfb473501d20e43801b7c4ba` | 1,353 | `0594d749ff244823a30322b0c0ddd745ed86782ea6e2b5d9248872b92f1fabb8` |
+| `isRegistered` | 8 | 129 | `bls_midnight_2p8` | 224,215 | `a85ece0d21a7b62c4bae2a1a1512788de21acfb14b571d79eed0b711cd73b66f` | 1,353 | `7eec7a11c0ba74b04679ac2f7ab7fac5d2ec63e33e2fb4b3eb820e7f452a05dd` |
+| `poolHasColour` | 8 | 129 | `bls_midnight_2p8` | 224,221 | `7dc2d4b8e59dfc2c6f15b8db74200035d87f912b8e1fbd3dfc1a1742c63a0c77` | 1,353 | `a649d8122bfe65f6c6dcc848aea68beb542403b85350fb351aaf1c3348c1042c` |
+| `poolValue` | 8 | 158 | `bls_midnight_2p8` | 224,507 | `5f4a4f4cd368d1bb91fd820cebf59502cf69455161497e94e34abc47546de027` | 1,353 | `69b00ade35adfc0a2f9e634797f50ad5bd74c16f01a1980838b9fdc35c065b1a` |
+| **total** | | | | **695,624,897** | | **17,217** | |
+
+**695,624,897 B of proving key and 17,217 B of verifying key**; `execute` is 82.0% of the total and
+the four smallest circuits are 0.16% of it between them. Key size tracks 2^k, not rows: the three
+k = 13 circuits differ by 1,047 B despite one having twice the rows of the others, and the two
+k = 8 circuits with *identical* row counts still differ by 6 B.
+
+The three pairs of circuits that share a `k` do **not** share a key — a key is generated from one
+specific `.zkir` against one specific SRS, and `isRegistered` and `poolHasColour` (both k = 8,
+both 129 rows) have different prover keys, different verifier keys and different sizes. Verifier
+keys within a `k` are the same size (1,353 / 2,121 / 3,321 B for k = 8-9 / 13-16 / 18) and never
+the same bytes.
 
 `emit-zkir` also writes a tenth file, `hello_positive_amount.zkir` — a minimal smoke circuit used
 during bring-up. It is not part of the contract's provable surface, but
@@ -375,6 +498,11 @@ image exits 70 instead of silently re-baselining.
 `keygen-zkir.sh` runs `zkir-v3 compile` rather than `compactc` deliberately: a MinoCrab artifact has
 no `.compact` source at all, so keying it from the raw ZKIR is the only route — and it means both
 artifacts are keyed by the *identical* tool, in the identical image, under identical bounds.
+
+It keys **one** circuit and refuses to overwrite an existing result, which is what you want while
+measuring. To key all nine at once, gate every hash and produce a publishable set, use
+`scripts/release-artifacts.sh` instead ([§ Releases](#releases)) — it drives the same
+`zkir-v3 compile`, so the two agree by construction.
 
 ### Proving and verifying
 
@@ -632,6 +760,12 @@ A byte change with a green differential suite is a legitimate re-record; a byte 
 explanation is a bug. CI can only ever see the first half of that sentence, so a green badge here
 is not a claim of equivalence — [§ What "equivalent" was tested to mean](#what-equivalent-was-tested-to-mean)
 is.
+
+`.github/workflows/release.yml` is the second workflow, and it answers a third question — *are
+the published keys the ones this repository documents?* It runs only on demand or on a tag, on
+`ubuntu-24.04-arm` where the pinned `zkir-v3` runs natively, and it re-derives every asset and
+every hash before it uploads anything ([§ Releases](#releases)). It is not part of the push gate:
+it costs a minute of keygen and 664 MB, and nothing about it needs to run on a branch.
 
 CI therefore also serves as the port's only **cross-platform** check: every number in this README
 was measured on `aarch64-apple-darwin`, and the artifact gate re-emitting identically on another

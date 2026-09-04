@@ -1,0 +1,136 @@
+# RELEASE — publish the port's ZKIR and keys as SHA-pinned assets.
+#
+# WHY A RELEASE EXISTS AT ALL
+#   This repository commits no compiled output, and a deployment needs a verifier key for every
+#   exported circuit at deploy time plus a prover key for every circuit it proves. Before this
+#   workflow the only way to get those was to reproduce the toolchain: the pinned compactc archive,
+#   the Midnight SRS for each circuit's k, and ~62 s of keygen. A consumer should be able to
+#   download a file and check its SHA-256 instead — which is what `SHA256SUMS` and `manifest.json`
+#   are for, and why the assets are 38 individual files rather than one archive.
+#
+# TWO ENTRY POINTS
+#   `workflow_dispatch`  a DRY RUN. Produces all 38 files, checks every recorded hash, prints
+#                        `SHA256SUMS` and `manifest.json` into the job summary, uploads those two
+#                        files (13 KB) as a run artifact — and publishes NOTHING. It holds no write
+#                        permission at all, so it cannot.
+#   `push` of a tag `v*` the real thing. Same build, byte for byte — then `gh release create`.
+#
+# WHY TWO JOBS FOR ONE BUILD
+#   `permissions:` is per job and takes no expressions, so "write only on the tag path" cannot be
+#   done with a conditional inside one job. The eight build steps therefore live in
+#   `.github/actions/build-release-artifacts` and both jobs call it; see that file's header.
+#
+# WHY `ubuntu-24.04-arm`
+#   The pinned compactc asset is `aarch64-unknown-linux-musl` and its `zkir-v3` is a static
+#   executable, so an arm64 Linux runner runs it directly: no Docker, no emulation, no privileges.
+#   Hosted arm64 runners are free for public repositories. On x86_64 the pinned archive simply does
+#   not run, and re-pinning to the x86_64 asset would be a deliberate change needing its own proof
+#   that the outputs are identical (see docker/compactc.Dockerfile).
+#
+# WHAT MAKES THIS SAFE TO POINT A DEPLOYMENT AT
+#   `scripts/release-artifacts.sh` refuses to publish if any recorded hash moves — the emitted IR,
+#   the SRS, the `zkir-v3` binary, each circuit's `k`, or the prover/verifier pairs themselves. A
+#   tag whose keygen produced different bytes than the ones this repository documents fails here
+#   rather than becoming a release nobody can reproduce.
+#
+# COST: ~62 s of keygen, ~664 MB of assets, dominated by `execute` at k=18 (~54 s, 544 MiB, and it
+# needs 4 GiB of memory — measured; it is OOM-killed at 3 GiB). The hosted arm64 runner is
+# 4 vCPU / 16 GiB, so the bound is disk and upload time, not memory. Budget 45 minutes.
+
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+# Nothing here needs write access by default. The publish job raises it for itself.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 3
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  # Dry run: everything a release does except the release.
+  # ---------------------------------------------------------------------------------------------
+  dry-run:
+    name: dry run (no upload)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/build-release-artifacts
+        with:
+          tag: unreleased
+
+      - name: Say what would have been published
+        run: |
+          echo "DRY RUN — nothing was uploaded."
+          echo "The 38 assets are in generated/release; SHA256SUMS and manifest.json are in the"
+          echo "job summary and in the run artifact. Tag a commit \`v*\` to publish."
+
+  # ---------------------------------------------------------------------------------------------
+  # The real release. Runs only for a pushed tag, and is the only job that can write.
+  # ---------------------------------------------------------------------------------------------
+  publish:
+    name: publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: write
+
+    steps:
+      # `fetch-depth: 0` so `--verify-tag` has the tag object to verify.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/build-release-artifacts
+        with:
+          tag: ${{ github.ref_name }}
+
+      # `--verify-tag` refuses to create a release for a tag that does not exist in the repository,
+      # which is the check that keeps a typo from silently creating one. The body is GENERATED from
+      # `manifest.json` (`scripts/release-notes.py`), so the page and the files cannot disagree.
+      # The assets are listed by glob rather than enumerated: the script decides what a release
+      # contains, and a hand-written list here would be a second, staler answer.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd generated/release
+          count="$(find . -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          echo "uploading $count assets as $TAG"
+          test "$count" -eq 38 || { echo "expected 38 assets, found $count" >&2; exit 1; }
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "AA manager (MinoCrab port) $TAG — ZKIR and keys for all nine circuits" \
+            --notes-file "$RELEASE_NOTES" \
+            SHA256SUMS manifest.json \
+            ./*.zkir ./*.bzkir ./*.prover ./*.verifier
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json name,tagName,assets \
+            --jq '{name, tagName, assets: (.assets | length)}'

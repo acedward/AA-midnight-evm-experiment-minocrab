@@ -51,6 +51,20 @@
 #                                                      (`<path>` is the product's `contracts/`:
 #                                                      `manager.compact` + `modules/*.compact`)
 #   scripts/check-port-artifacts.sh --no-toolchain-check   skip the Docker toolchain probe
+#   scripts/check-port-artifacts.sh --with-keys <dir>      ALSO check a directory of proving and
+#                                                          verifying keys against the record
+#
+# THE KEY RECORD, AND WHY IT IS NOT PART OF THE DEFAULT GATE
+#   Since 00029 the fixture also carries a `prover`/`verifier` pair (plus the `k` and `rows` they
+#   were generated at) for each of the nine circuits a release publishes — written by
+#   `scripts/release-artifacts.sh --write-keys`, which is the only thing that can produce them.
+#   Those hashes are NOT decided by this crate alone: they are decided by the `.zkir`, by the
+#   `zkir-v3` in `toolchain`, and by the SRS in `fixtures/srs-hashes.json`. Regenerating them needs
+#   Docker or an arm64 Linux host, the SRS, minutes of CPU and ~700 MB of disk, which is exactly
+#   why the cheap gate — the one CI runs on every push — does not do it.
+#   `--with-keys <dir>` compares an EXISTING directory of keys (`generated/release`, say, or an
+#   unpacked release download) against the record without generating anything, so a consumer can
+#   check a download with the same code the project gates with.
 #
 # `--write` never runs by accident: the gate itself is the no-argument form. Re-record only when a
 # byte change is INTENDED and explained — the commit message must say which hashes moved and why.
@@ -66,6 +80,7 @@ fixture="$repo_root/fixtures/port-artifact-hashes.json"
 
 mode="compare"
 zkir_dir=""
+keys_dir=""
 toolchain_check=1
 contract_pin_override=""
 contract_sha_override=""
@@ -76,16 +91,21 @@ while [ "$#" -gt 0 ]; do
     --write)                mode="write"; shift ;;
     --zkir-dir)             zkir_dir="${2:?--zkir-dir needs a directory}"; shift 2 ;;
     --no-toolchain-check)   toolchain_check=0; shift ;;
+    --with-keys)            keys_dir="${2:?--with-keys needs a directory of key files}"; shift 2 ;;
     --contract-pin)         contract_pin_override="${2:?--contract-pin needs a commit sha}"; shift 2 ;;
     --contract-sha256)      contract_sha_override="${2:?--contract-sha256 needs a sha256}"; shift 2 ;;
     --contract-dir)         contract_dir="${2:?--contract-dir needs the contracts directory}"; shift 2 ;;
-    -h|--help)              sed -n '2,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help)              sed -n '2,66p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *)                      echo "unknown argument: $1" >&2; exit 64 ;;
   esac
 done
 
 echo "=== check-port-artifacts ==="
 echo "MODE=$mode"
+if [ -n "$keys_dir" ]; then
+  keys_dir="$(cd "$keys_dir" && pwd)"
+  echo "KEYS_DIR=$keys_dir"
+fi
 
 # --- the eDSL rev that decides every byte below -------------------------------------------------
 # Read from the root manifest rather than hard-coded here: the manifest is where a bump actually
@@ -165,6 +185,7 @@ ZKIR_V3_SHA256="$zkir_v3_sha256" \
 CONTRACT_PIN_OVERRIDE="$contract_pin_override" \
 CONTRACT_SHA_OVERRIDE="$contract_sha_override" \
 CONTRACT_FILES="$contract_files" \
+KEYS_DIR="$keys_dir" \
 python3 - <<'PY'
 import datetime, hashlib, json, os, sys
 
@@ -208,6 +229,43 @@ if os.environ.get("CONTRACT_FILES", "").strip():
     if "manager.compact" in files:
         contract["managerCompactSha256"] = files["manager.compact"]
 
+# The key record belongs to a SPECIFIC .zkir. Carry it forward across a re-record when the bytes
+# did not move, and DROP it when they did — silently keeping a key hash next to IR that no longer
+# produces it is the one way this file could lie. Dropping is announced, loudly, because it means a
+# release must re-key before it can be cut.
+prev_circuits = prev.get("circuits", {})
+carried, dropped = [], []
+for name, rec in observed.items():
+    old_rec = prev_circuits.get(name, {})
+    if not any(k in old_rec for k in ("prover", "verifier")):
+        continue
+    if old_rec.get("sha256") == rec["sha256"]:
+        for field in ("k", "rows", "prover", "verifier"):
+            if field in old_rec:
+                rec[field] = old_rec[field]
+        carried.append(name)
+    else:
+        dropped.append(name)
+
+# `--no-toolchain-check` must not QUIETLY erase provenance. Since 00029 the toolchain block is
+# what identifies the `zkir-v3` the recorded key hashes came out of, so a re-record that did not
+# probe Docker carries the previous block forward rather than stamping "not-probed" over it.
+toolchain_record = {
+    "note": (
+        "Recorded for the reader, NOT load-bearing for the .zkir hashes: nothing in this repository "
+        "is compiled by compactc. This is the toolchain the README's reference (compactc baseline) "
+        "numbers were measured with, and — since 00029 — the `zkir-v3` that produced every key hash "
+        "under `circuits`, for which it IS load-bearing."
+    ),
+    "image": os.environ["TOOLCHAIN_IMAGE"],
+    "compactcBinSha256": os.environ["COMPACTC_BIN_SHA256"],
+    "zkirV3Sha256": os.environ["ZKIR_V3_SHA256"],
+}
+toolchain_carried = False
+if toolchain_record["image"] == "not-probed" and prev.get("toolchain", {}).get("image", "not-probed") != "not-probed":
+    toolchain_record = dict(prev["toolchain"])
+    toolchain_carried = True
+
 if mode == "write":
     doc = {
         "note": (
@@ -220,22 +278,25 @@ if mode == "write":
         "recordedAt": datetime.date.today().isoformat(),
         "minocrabRev": os.environ["MINOCRAB_REV"],
         "contractPin": contract,
-        "toolchain": {
-            "note": (
-                "Recorded for the reader, NOT load-bearing for the hashes: nothing in this repository is "
-                "compiled by compactc. This is the toolchain the README's reference (compactc baseline) "
-                "and key numbers were measured with."
-            ),
-            "image": os.environ["TOOLCHAIN_IMAGE"],
-            "compactcBinSha256": os.environ["COMPACTC_BIN_SHA256"],
-            "zkirV3Sha256": os.environ["ZKIR_V3_SHA256"],
-        },
+        "toolchain": toolchain_record,
         "circuits": observed,
     }
+    if "keysNote" in prev:
+        doc = {"note": doc["note"], "keysNote": prev["keysNote"],
+               **{k: v for k, v in doc.items() if k != "note"}}
     with open(fixture, "w") as fh:
         json.dump(doc, fh, indent=2)
         fh.write("\n")
     print(f"WROTE {fixture}")
+    if toolchain_carried:
+        print("  toolchain block CARRIED FORWARD (--no-toolchain-check did not probe it)")
+    if carried:
+        print(f"  key record CARRIED FORWARD for {len(carried)} circuit(s) whose .zkir did not move")
+    if dropped:
+        print(f"  key record DROPPED for {len(dropped)} circuit(s) whose .zkir MOVED: "
+              f"{', '.join(sorted(dropped))}")
+        print("  Those keys no longer describe this IR. Re-key with")
+        print("  `scripts/release-artifacts.sh --write-keys` before cutting a release.")
     print(f"  {len(observed)} circuit(s), minocrab rev {doc['minocrabRev']}")
     print(f"  contract pin {contract.get('commit', '(unset)')} "
           f"manager.compact {contract.get('managerCompactSha256', '(unset)')}")
@@ -289,6 +350,36 @@ for n in sorted(set(recorded) | set(observed)):
             f"observed {got['bytes']} B/{got['sha256'][:16]}…"
         )
 
+keys_dir = os.environ.get("KEYS_DIR", "")
+recorded_keys = {n: r for n, r in recorded.items() if "prover" in r or "verifier" in r}
+if recorded_keys and not keys_dir:
+    print(f"--- keys: {len(recorded_keys)} circuit(s) carry a recorded key pair "
+          f"(not checked — pass --with-keys <dir> to check a directory of key files)")
+elif keys_dir:
+    print(f"--- keys (bytes, sha256) from {keys_dir}")
+    if not recorded_keys:
+        print("  ! the record carries no key hashes at all — nothing to check against")
+        failures.append("--with-keys given, but fixtures/port-artifact-hashes.json records no keys")
+    for n in sorted(recorded_keys):
+        for kind in ("prover", "verifier"):
+            want = recorded_keys[n].get(kind)
+            if not want:
+                continue
+            path = os.path.join(keys_dir, f"{n}.{kind}")
+            if not os.path.exists(path):
+                print(f"  - {n + '.' + kind:38} RECORDED, NOT PRESENT")
+                failures.append(f"{n}.{kind}: recorded but not in {keys_dir}")
+                continue
+            b, h = os.path.getsize(path), sha256(path)
+            if b == want["bytes"] and h == want["sha256"]:
+                print(f"    {n + '.' + kind:38} {b:>10} B  {h}  ==")
+            else:
+                print(f"  ! {n + '.' + kind:38} recorded {want['bytes']:>10} B  {want['sha256']}")
+                print(f"    {'':38} observed {b:>10} B  {h}")
+                failures.append(
+                    f"{n}.{kind}: recorded {want['bytes']} B/{want['sha256'][:16]}…, "
+                    f"observed {b} B/{h[:16]}…")
+
 print("---")
 if failures:
     print(f"PORT ARTIFACT GATE FAILED ({len(failures)} difference(s)):")
@@ -303,5 +394,8 @@ if failures:
         print("  statement moved on purpose, run the differential suite first")
         print("  (`cargo test --features compactc-baseline`) and only then re-record.")
     sys.exit(1)
-print(f"PORT ARTIFACT GATE OK — {len(observed)} circuit(s), every size and hash identical")
+suffix = ""
+if keys_dir:
+    suffix = f", plus {sum(1 for n in recorded_keys for k in ('prover', 'verifier') if k in recorded_keys[n])} key file(s)"
+print(f"PORT ARTIFACT GATE OK — {len(observed)} circuit(s), every size and hash identical{suffix}")
 PY

@@ -1,5 +1,6 @@
 {
   "note": "The SIZE and SHA-256 of every .zkir `emit-zkir` produces, i.e. the README's expected-hash table in machine form. Compared by scripts/check-port-artifacts.sh; re-record with `--write` ONLY when a byte change is intended and the commit message says which hashes moved and why. Emission is deterministic and needs no compactc, no Docker and no network: the hashes are decided by the `minocrab` rev below and by this crate's source, nothing else.",
+  "keysNote": "`prover`/`verifier` (and the `k`/`rows` next to them) are present for the circuits a release publishes keys for. Unlike the .zkir hashes above, these are NOT decided by this crate alone: they are decided by the .zkir, by the `zkir-v3` in `toolchain` and by the SRS in fixtures/srs-hashes.json. scripts/release-artifacts.sh reproduces them on every run and fails if any moves; scripts/check-port-artifacts.sh --with-keys <dir> checks a directory of keys against them. Regenerating them takes minutes and hundreds of megabytes, which is why the cheap gate does not do it by default.",
   "recordedAt": "2026-09-04",
   "minocrabRev": "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9",
   "contractPin": {
@@ -27,19 +28,59 @@
   "circuits": {
     "accountRecord": {
       "bytes": 6065,
-      "sha256": "2530fca640e76a817c234b84ba4144fe5f2341fcda319e1af3a5c16ce3977ffa"
+      "sha256": "2530fca640e76a817c234b84ba4144fe5f2341fcda319e1af3a5c16ce3977ffa",
+      "k": 9,
+      "rows": 332,
+      "prover": {
+        "bytes": 447566,
+        "sha256": "1bbc116fed749d73fd353fe0dbc63a7246f19eb6cfb473501d20e43801b7c4ba"
+      },
+      "verifier": {
+        "bytes": 1353,
+        "sha256": "0594d749ff244823a30322b0c0ddd745ed86782ea6e2b5d9248872b92f1fabb8"
+      }
     },
     "depositShielded": {
       "bytes": 14927,
-      "sha256": "eada91aa306819d4dfd0395b2efb03d882131f33d42f1b8ed34a984e76859cd8"
+      "sha256": "eada91aa306819d4dfd0395b2efb03d882131f33d42f1b8ed34a984e76859cd8",
+      "k": 16,
+      "rows": 42256,
+      "prover": {
+        "bytes": 90187617,
+        "sha256": "f7a255255383a6f890f131163a1a5671e719ecc341c1bda47ed8af449af0eaea"
+      },
+      "verifier": {
+        "bytes": 2121,
+        "sha256": "1cd0429b671a1b036572b5f141c499d44ca578463d5761e6c72e447395b9ccb8"
+      }
     },
     "depositUnshielded": {
       "bytes": 4333,
-      "sha256": "29ba8b53bbe4bc233f41f3ab5371c13a11a5698f587554f89b298bedc764ea53"
+      "sha256": "29ba8b53bbe4bc233f41f3ab5371c13a11a5698f587554f89b298bedc764ea53",
+      "k": 13,
+      "rows": 7917,
+      "prover": {
+        "bytes": 11278219,
+        "sha256": "cc4a2cf42e279f67268250aec376fe10e1664124213bd2e5ad0e7fd2e840f0d3"
+      },
+      "verifier": {
+        "bytes": 2121,
+        "sha256": "e124ec54677b06ca1a89f434da28cf8e2105c71ca00edce947c1d99bd4336ff9"
+      }
     },
     "execute": {
       "bytes": 123635,
-      "sha256": "50f09e0b36bb8cf34e6db52fbbff46a4d94746dd4fc10895e8c770c4f26298c0"
+      "sha256": "50f09e0b36bb8cf34e6db52fbbff46a4d94746dd4fc10895e8c770c4f26298c0",
+      "k": 18,
+      "rows": 211047,
+      "prover": {
+        "bytes": 570484204,
+        "sha256": "eb4405382ba8dd2fc86434410f284db3493e804148ce7b0e3d54952d1a5db5a9"
+      },
+      "verifier": {
+        "bytes": 3321,
+        "sha256": "13096f6f22344b264d85b86af2da811f797cce55e76d085e0185eb81bc359b60"
+      }
     },
     "hello_positive_amount": {
       "bytes": 314,
@@ -47,23 +88,73 @@
     },
     "isRegistered": {
       "bytes": 786,
-      "sha256": "25eaf82d9391232e00ce0c15e95cbaf004f7acb59d82827c7429be08328bcb0f"
+      "sha256": "25eaf82d9391232e00ce0c15e95cbaf004f7acb59d82827c7429be08328bcb0f",
+      "k": 8,
+      "rows": 129,
+      "prover": {
+        "bytes": 224215,
+        "sha256": "a85ece0d21a7b62c4bae2a1a1512788de21acfb14b571d79eed0b711cd73b66f"
+      },
+      "verifier": {
+        "bytes": 1353,
+        "sha256": "7eec7a11c0ba74b04679ac2f7ab7fac5d2ec63e33e2fb4b3eb820e7f452a05dd"
+      }
     },
     "poolHasColour": {
       "bytes": 792,
-      "sha256": "55c30b8add242f7093c2e40e2124d02a9f4f3a9d19259736ab142a3ebd7d0709"
+      "sha256": "55c30b8add242f7093c2e40e2124d02a9f4f3a9d19259736ab142a3ebd7d0709",
+      "k": 8,
+      "rows": 129,
+      "prover": {
+        "bytes": 224221,
+        "sha256": "7dc2d4b8e59dfc2c6f15b8db74200035d87f912b8e1fbd3dfc1a1742c63a0c77"
+      },
+      "verifier": {
+        "bytes": 1353,
+        "sha256": "a649d8122bfe65f6c6dcc848aea68beb542403b85350fb351aaf1c3348c1042c"
+      }
     },
     "poolValue": {
       "bytes": 1632,
-      "sha256": "9aeab69ad730f80f747e0fedd5a5301be0e8b7367db6f99af47275366a40dad3"
+      "sha256": "9aeab69ad730f80f747e0fedd5a5301be0e8b7367db6f99af47275366a40dad3",
+      "k": 8,
+      "rows": 158,
+      "prover": {
+        "bytes": 224507,
+        "sha256": "5f4a4f4cd368d1bb91fd820cebf59502cf69455161497e94e34abc47546de027"
+      },
+      "verifier": {
+        "bytes": 1353,
+        "sha256": "69b00ade35adfc0a2f9e634797f50ad5bd74c16f01a1980838b9fdc35c065b1a"
+      }
     },
     "shieldedAccountBalance": {
       "bytes": 1768,
-      "sha256": "132a4afceb81c656d34493c9806a42bb321fe0373341b1bf5bbd4e85c110abdb"
+      "sha256": "132a4afceb81c656d34493c9806a42bb321fe0373341b1bf5bbd4e85c110abdb",
+      "k": 13,
+      "rows": 4000,
+      "prover": {
+        "bytes": 11277172,
+        "sha256": "87200767a2d22c8ed0800571bd9e368ca8c0904b6fe17fee49edb51eb9a7af80"
+      },
+      "verifier": {
+        "bytes": 2121,
+        "sha256": "9079e1e4d2c1c6216e6b796793cea060508e2bb81362d8b846afbbc90a7ecb3e"
+      }
     },
     "unshieldedAccountBalance": {
       "bytes": 1772,
-      "sha256": "e609149de5161522555677b777ba82717d71c5bb0e96afab8acf4c68f214e982"
+      "sha256": "e609149de5161522555677b777ba82717d71c5bb0e96afab8acf4c68f214e982",
+      "k": 13,
+      "rows": 4000,
+      "prover": {
+        "bytes": 11277176,
+        "sha256": "ad24ef7e8ec120121165d9b1e8b779e95df70c9fc6a12c80e35718a219eb3ad8"
+      },
+      "verifier": {
+        "bytes": 2121,
+        "sha256": "f2831ba26b343aedaccf0dc55e45e1efd81a34789aa48409a492651afb8a6649"
+      }
     }
   }
 }
