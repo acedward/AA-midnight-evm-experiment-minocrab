@@ -254,7 +254,7 @@ impl Payload {
     }
 
     /// The EIP-712 struct-hash preimage for this payload's selector, as the 32-byte words
-    /// `evmStructHashFor` concatenates (`manager.compact:517-551`).
+    /// `evmStructHashFor` concatenates (`contracts/modules/Eip712.compact:158-192`).
     pub fn struct_hash(&self, manager: &[u8; 32]) -> [u8; 32] {
         use manager_port::eip712 as e;
         let owner_word = addr_word(&self.owner);
@@ -325,7 +325,7 @@ impl Payload {
     }
 }
 
-/// `evmDomainSeparatorFor(manager, domain)` (`manager.compact:509-515`).
+/// `evmDomainSeparatorFor(manager, domain)` (`contracts/modules/Eip712.compact:148-154`).
 pub fn domain_separator(manager: &[u8; 32], domain: &[u8; 32]) -> [u8; 32] {
     use manager_port::eip712 as e;
     let alias_digest = keccak(&[manager]);
@@ -345,7 +345,7 @@ pub fn eip712_digest(sep: &[u8; 32], struct_hash: &[u8; 32]) -> [u8; 32] {
     keccak(&[&[0x19u8, 0x01u8][..], sep, struct_hash])
 }
 
-/// `evmAccountIdFor(manager, owner, salt)` (`manager.compact:502-507`).
+/// `evmAccountIdFor(manager, owner, salt)` (`contracts/modules/Eip712.compact:139-144`).
 pub fn evm_account_id(manager: &[u8; 32], owner: &[u8; 20], salt: &[u8; 32]) -> [u8; 32] {
     keccak(&[
         &manager_port::eip712::ACCOUNT_TAG,
@@ -409,7 +409,13 @@ impl Reads {
     }
 
     /// A `QualifiedShieldedCoinInfo` (`pools.lookup`) — six limbs.
-    pub fn coin(&mut self, nonce: &[u8; 32], color: &[u8; 32], value: u128, mt_index: u64) -> &mut Self {
+    pub fn coin(
+        &mut self,
+        nonce: &[u8; 32],
+        color: &[u8; 32],
+        value: u128,
+        mt_index: u64,
+    ) -> &mut Self {
         self.b32(nonce);
         self.b32(color);
         self.u128(value);

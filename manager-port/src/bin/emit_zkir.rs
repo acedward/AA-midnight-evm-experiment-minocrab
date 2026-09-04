@@ -42,7 +42,10 @@ fn main() {
 
     if !wanted.is_empty() {
         let known: BTreeSet<&str> = circuits.iter().map(|(n, _)| *n).collect();
-        let unknown: Vec<&String> = wanted.iter().filter(|w| !known.contains(w.as_str())).collect();
+        let unknown: Vec<&String> = wanted
+            .iter()
+            .filter(|w| !known.contains(w.as_str()))
+            .collect();
         if !unknown.is_empty() {
             eprintln!("unknown circuit(s): {unknown:?}");
             eprintln!("known: {known:?}");

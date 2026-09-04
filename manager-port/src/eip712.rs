@@ -1,5 +1,10 @@
 //! Phase 3.2 — the AUTH-EIP712-AA-V3-V1 chain: `evmAccountIdFor`, `evmDomainSeparatorFor`,
-//! `evmStructHashFor`, `evmDigestFor` (`manager.compact:422-564`).
+//! `evmStructHashFor`, `evmDigestFor` (`contracts/modules/Eip712.compact:55-207`).
+//!
+//! **Compact twin**: `contracts/modules/Eip712.compact`, which holds the ten frozen EIP-712 hex
+//! constants and the whole digest chain. **Circuits ported here: none** — every circuit in that
+//! module is `pure` and emits no key; they are exported as free oracles and are called from
+//! `execute`.
 //!
 //! **These bytes are FROZEN.** They are what a MetaMask signature commits to, so a single wrong
 //! byte silently invalidates every signature the deployed contract would accept. The gate is
@@ -21,13 +26,13 @@
 //! That claim is **not taken on faith**: it is what the frozen-fixture suite checks, on 60 cases
 //! across all six action types. If it were wrong, every digest would differ.
 
-use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::v3::AnyWire3;
+use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::{Alignment, AlignmentAtom, AlignmentSegment, Public};
 use minocrab_std::v3::{pow2_const, Vis3, B32};
 
-use crate::payload::ExecutePayload;
-use crate::words::{address_word, b32_const, numeric_word};
+use crate::action_envelope::ExecutePayload;
+use crate::byte_codec::{address_word, b32_const, numeric_word};
 
 /// One `Bytes<n>` alignment segment.
 fn atom(n: u32) -> AlignmentSegment {
@@ -39,7 +44,7 @@ fn words(count: usize) -> Alignment {
     Alignment((0..count).map(|_| atom(32)).collect())
 }
 
-// ---- the frozen constants (`manager.compact:422-490`) -----------------------------------------
+// ---- the frozen constants (`contracts/modules/Eip712.compact:55-123`) -----------------------------------------
 //
 // Byte-for-byte from the contract. Each is a keccak type hash or a hashed domain field, computed
 // off-circuit once and frozen; the contract hard-codes them and so does this port.
@@ -115,10 +120,13 @@ fn push_b32<V: Vis3>(limbs: &mut Vec<AnyWire3<V>>, b: &B32<V>) {
 /// Lift a public `B32` constant into the caller's visibility. Zero instructions — it is the
 /// same two wires, retyped.
 fn b32_from_public<V: Vis3>(b: B32<Public>) -> B32<V> {
-    B32 { hi: V::from_public(b.hi), lo: V::from_public(b.lo) }
+    B32 {
+        hi: V::from_public(b.hi),
+        lo: V::from_public(b.lo),
+    }
 }
 
-/// `evmAccountIdFor(manager, owner, salt)` (`manager.compact:502-507`).
+/// `evmAccountIdFor(manager, owner, salt)` (`contracts/modules/Eip712.compact:139-144`).
 ///
 /// `keccak256(accountTag ‖ manager ‖ addressWord(owner) ‖ salt)` — four 32-byte words.
 pub fn evm_account_id_for<V: Vis3>(
@@ -140,7 +148,7 @@ pub fn evm_account_id_for<V: Vis3>(
     })
 }
 
-/// `evmDomainSeparatorFor(manager, domain)` (`manager.compact:509-515`).
+/// `evmDomainSeparatorFor(manager, domain)` (`contracts/modules/Eip712.compact:148-154`).
 ///
 /// The manager's 32 bytes are first hashed and truncated to a 20-byte EVM **alias**
 /// (`slice<20>(keccak256(manager), 12)` — the low 20 bytes of the digest, EVM address convention),
@@ -190,7 +198,7 @@ fn manager_alias_word<V: Vis3>(c: &mut Circuit3, manager: &B32<V>) -> B32<V> {
     B32 { hi: digest.hi, lo }
 }
 
-/// `eip712Digest(domainSeparator, structHash)` (`manager.compact:553-556`).
+/// `eip712Digest(domainSeparator, structHash)` (`contracts/modules/Eip712.compact:194-197`).
 ///
 /// `keccak256(0x19 ‖ 0x01 ‖ domainSeparator ‖ structHash)` — a 2-byte prefix atom then two
 /// 32-byte words, 66 bytes total.
@@ -212,7 +220,7 @@ pub fn eip712_digest<V: Vis3>(
     })
 }
 
-/// The per-selector struct-hash preimages of `evmStructHashFor` (`manager.compact:517-551`).
+/// The per-selector struct-hash preimages of `evmStructHashFor` (`contracts/modules/Eip712.compact:158-192`).
 ///
 /// Returned as `(alignment_word_count, limbs)` so the caller can hash them; each is a sequence of
 /// 32-byte words, matching the Compact source's `Bytes<192>` / `Bytes<320>` / `Bytes<288>` /
@@ -239,7 +247,10 @@ pub fn struct_hash_preimage_register<V: Vis3>(
     push_b32(&mut limbs, &owner_word);
     push_b32(&mut limbs, &p.account_salt);
     push_b32(&mut limbs, &valid_until);
-    StructHashPreimage { word_count: 6, limbs }
+    StructHashPreimage {
+        word_count: 6,
+        limbs,
+    }
 }
 
 /// Selectors 2 and 3 — `WithdrawShielded` / `WithdrawUnshielded`, `Bytes<320>` = 10 words:
@@ -270,7 +281,10 @@ pub fn struct_hash_preimage_withdraw<V: Vis3>(
     push_b32(&mut limbs, &amount);
     push_b32(&mut limbs, &kind);
     push_b32(&mut limbs, &p.recipient);
-    StructHashPreimage { word_count: 10, limbs }
+    StructHashPreimage {
+        word_count: 10,
+        limbs,
+    }
 }
 
 /// Selectors 4 and 5 — `TransferInternalShielded` / `TransferInternalUnshielded`, `Bytes<288>` =
@@ -296,7 +310,10 @@ pub fn struct_hash_preimage_transfer<V: Vis3>(
     push_b32(&mut limbs, &p.to_account);
     push_b32(&mut limbs, &p.primary_color);
     push_b32(&mut limbs, &amount);
-    StructHashPreimage { word_count: 9, limbs }
+    StructHashPreimage {
+        word_count: 9,
+        limbs,
+    }
 }
 
 /// Selector 6 — `OpenSwapShielded`, `Bytes<448>` = 14 words:
@@ -331,14 +348,87 @@ pub fn struct_hash_preimage_open_swap<V: Vis3>(
     push_b32(&mut limbs, &p.want_color);
     push_b32(&mut limbs, &want_amount);
     push_b32(&mut limbs, &p.credit_account);
-    StructHashPreimage { word_count: 14, limbs }
+    StructHashPreimage {
+        word_count: 14,
+        limbs,
+    }
 }
 
 /// Hash a prepared struct-hash preimage.
-pub fn hash_struct_preimage<V: Vis3>(
-    c: &mut Circuit3,
-    pre: StructHashPreimage<V>,
-) -> B32<V> {
+pub fn hash_struct_preimage<V: Vis3>(c: &mut Circuit3, pre: StructHashPreimage<V>) -> B32<V> {
     let d = c.keccak256(words(pre.word_count), &pre.limbs);
     B32::from_typed(c, d)
+}
+
+/// `evmDigestFor(manager, domain, payload)` (`contracts/modules/Eip712.compact:201-207`) —
+/// `eip712Digest(evmDomainSeparatorFor(manager, domain), evmStructHashFor(manager, payload))`.
+pub fn evm_digest_for(
+    c: &mut Circuit3,
+    manager: &B32<Public>,
+    domain: &B32<Public>,
+    p: &ExecutePayload<Public>,
+) -> B32<Public> {
+    let sep = evm_domain_separator_for(c, manager, domain);
+    let sh = evm_struct_hash_for(c, manager, p);
+    eip712_digest(c, &sep, &sh)
+}
+
+/// `evmStructHashFor(manager, payload)` (`contracts/modules/Eip712.compact:158-192`).
+///
+/// A chain of `if (…) { return keccak(…); }` blocks: a circuit compiles every arm, so all four
+/// preimages are hashed and the answer is selected. The trailing
+/// `assert(p.selector == 6, "EIP-712 selector must be 1..6")` binds under the fall-through
+/// condition — which, combined with the caller's `selector != 0` guard, is exactly "selector is 6".
+pub fn evm_struct_hash_for(
+    c: &mut Circuit3,
+    manager: &B32<Public>,
+    p: &ExecutePayload<Public>,
+) -> B32<Public> {
+    c.region("eip712: struct hash", |c| {
+        let s1 = p.selector.eq(1u64).into_wire(c);
+        let s2 = p.selector.eq(2u64).into_wire(c);
+        let s3 = p.selector.eq(3u64).into_wire(c);
+        let s4 = p.selector.eq(4u64).into_wire(c);
+        let s5 = p.selector.eq(5u64).into_wire(c);
+        let is_withdraw = c.cond_select(s2, 1u64, s3);
+        let is_transfer = c.cond_select(s4, 1u64, s5);
+
+        let register = {
+            let pre = struct_hash_preimage_register(c, manager, p);
+            hash_struct_preimage(c, pre)
+        };
+        let withdraw = {
+            let a = b32_const(c, &WITHDRAW_SHIELDED_TYPE);
+            let b = b32_const(c, &WITHDRAW_UNSHIELDED_TYPE);
+            let t = B32::cond_select(c, s2, &a, &b);
+            let pre = struct_hash_preimage_withdraw(c, &t, manager, p);
+            hash_struct_preimage(c, pre)
+        };
+        let transfer = {
+            let a = b32_const(c, &TRANSFER_SHIELDED_TYPE);
+            let b = b32_const(c, &TRANSFER_UNSHIELDED_TYPE);
+            let t = B32::cond_select(c, s4, &a, &b);
+            let pre = struct_hash_preimage_transfer(c, &t, manager, p);
+            hash_struct_preimage(c, pre)
+        };
+        let swap = {
+            let pre = struct_hash_preimage_open_swap(c, manager, p);
+            hash_struct_preimage(c, pre)
+        };
+
+        // The fall-through assert: `!s1 && !(s2||s3) && !(s4||s5)` must mean selector 6.
+        let not_s1 = c.not(s1);
+        let not_wd = c.not(is_withdraw);
+        let not_tr = c.not(is_transfer);
+        let rest = c.cond_select(not_s1, not_wd, 0u64);
+        let rest = c.cond_select(rest, not_tr, 0u64);
+        c.when(rest, |c| {
+            c.assert(p.selector.eq(6u64).message("EIP-712 selector must be 1..6"));
+        });
+
+        // s1 ? register : (isWithdraw ? withdraw : (isTransfer ? transfer : swap))
+        let inner = B32::cond_select(c, is_transfer, &transfer, &swap);
+        let inner = B32::cond_select(c, is_withdraw, &withdraw, &inner);
+        B32::cond_select(c, s1, &register, &inner)
+    })
 }

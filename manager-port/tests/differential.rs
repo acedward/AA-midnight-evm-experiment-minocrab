@@ -104,7 +104,9 @@ fn assert_call_compatible(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage
         our_run.pi_skips
     );
     assert_eq!(
-        theirs.check(pi).expect("upstream accepts the compactc artifact"),
+        theirs
+            .check(pi)
+            .expect("upstream accepts the compactc artifact"),
         their_run.pi_skips
     );
 }
@@ -219,8 +221,13 @@ fn preimage_out(inputs: Vec<Fr>, ops: &[VmOp], reads: &[Fr], outputs: &[Fr]) -> 
 
 // ---- isRegistered -----------------------------------------------------------------------------
 
-/// `accounts` is ledger field **1** (declaration order in `manager.compact:262-278`).
-const ACCOUNTS: u8 = 1;
+/// `accounts`' ledger field index — **derived from the port's own ledger block**, not a literal.
+///
+/// It was `1` while the contract was one file and is `0` since the module split (product `main` @
+/// `41de69d`): `AccountRegistry.compact` contributes its four fields ahead of everything else.
+/// Reading it out of [`manager_port::ledger::slot`] means the struct in `src/ledger.rs` is the
+/// single place the number lives, on both the emitting and the checking side of this test.
+const ACCOUNTS: u8 = manager_port::ledger::slot::ACCOUNTS;
 
 /// The transcript of `accounts.member(owner)` answering `answer`.
 fn is_registered_scenario(owner: &[u8; 32], answer: u8) -> ProofPreimage {
@@ -253,7 +260,7 @@ fn an_account() -> [u8; 32] {
 /// bar — but when it holds it is the strongest statement available, so it is recorded.
 #[test]
 fn is_registered_instruction_stream_matches_compactc() {
-    let ours = manager_port::queries::is_registered().ir;
+    let ours = manager_port::account_registry::is_registered().ir;
     let theirs = theirs("isRegistered");
 
     let canon = |ir: &IrSource| {
@@ -269,7 +276,7 @@ fn is_registered_instruction_stream_matches_compactc() {
 
 #[test]
 fn is_registered_matches_compactc_registered() {
-    let ours = manager_port::queries::is_registered().ir;
+    let ours = manager_port::account_registry::is_registered().ir;
     let theirs = theirs("isRegistered");
     assert_call_compatible(&ours, &theirs, &is_registered_scenario(&an_account(), 1));
 }
@@ -279,14 +286,14 @@ fn is_registered_matches_compactc_registered() {
 /// artifacts must accept and agree on the PI vector.
 #[test]
 fn is_registered_matches_compactc_not_registered() {
-    let ours = manager_port::queries::is_registered().ir;
+    let ours = manager_port::account_registry::is_registered().ir;
     let theirs = theirs("isRegistered");
     assert_call_compatible(&ours, &theirs, &is_registered_scenario(&[0u8; 32], 0));
 }
 
 #[test]
 fn is_registered_tamper_agreement() {
-    let ours = manager_port::queries::is_registered().ir;
+    let ours = manager_port::account_registry::is_registered().ir;
     let theirs = theirs("isRegistered");
     assert_tamper_agreement(&ours, &theirs, &is_registered_scenario(&an_account(), 1));
 }

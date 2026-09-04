@@ -1,0 +1,69 @@
+{
+  "note": "The SIZE and SHA-256 of every .zkir `emit-zkir` produces, i.e. the README's expected-hash table in machine form. Compared by scripts/check-port-artifacts.sh; re-record with `--write` ONLY when a byte change is intended and the commit message says which hashes moved and why. Emission is deterministic and needs no compactc, no Docker and no network: the hashes are decided by the `minocrab` rev below and by this crate's source, nothing else.",
+  "recordedAt": "2026-09-04",
+  "minocrabRev": "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9",
+  "contractPin": {
+    "commit": "41de69ded41ff933fe0db8697b264dc46fc6e0cb",
+    "managerCompactSha256": "8e063ccfafbcda3cfaed572c00cce9c9436a958f1a7b5de23a3d7e37976a69b5",
+    "files": {
+      "manager.compact": "8e063ccfafbcda3cfaed572c00cce9c9436a958f1a7b5de23a3d7e37976a69b5",
+      "modules/AccountRegistry.compact": "5930a7fe58ef141734989d8a1e7bc93077d239afbc3c3b2635fd2405363fe67c",
+      "modules/ActionEnvelope.compact": "258135d5a5a7d19488dbe501db4631e65817d97813118e0e781b11e67f8e774b",
+      "modules/ByteCodec.compact": "e38dc28ac5600298a150cbceca5b9832b46c3c0824219d834853665bf1444ebe",
+      "modules/Custody.compact": "8186a3ad4454883c8820c26115c6dfc03541b08f04097bac1319b7cdd2dc6d70",
+      "modules/Eip712.compact": "b7ed601f3911f6f380945d16430ae2ea484d9687bf0cee214c1d747ce83fe031",
+      "modules/SemanticCommitment.compact": "d6a5228ebe4afdceea1e25559a3272c85776b6dc60e9fecdb18e1072454acebb",
+      "modules/ShieldedCustody.compact": "266fc8108b0ea6fdb30749951e68ad25ba3568da910999d8e235d650d05dd538",
+      "modules/UnshieldedCustody.compact": "e25bb7e7f9e74821030f40b0fcfd7dfe1b7814278dcd4cb344002ebfbccbe15c",
+      "modules/ZswapPrimitives.compact": "a4bea887671e5088fa74ab589daff43aa35fca6c352361699ce194dad00af49b"
+    }
+  },
+  "toolchain": {
+    "note": "Recorded for the reader, NOT load-bearing for the hashes: nothing in this repository is compiled by compactc. This is the toolchain the README's reference (compactc baseline) and key numbers were measured with.",
+    "image": "aa-compactc:0.34.0",
+    "compactcBinSha256": "628b343f9b0ebe32e6e6a141b6f73cc66edb19c516a4817b478c3b47f74230d5",
+    "zkirV3Sha256": "6a91308419d24bc0633210897d10c7c1b2193444e8bde09ce763e9556cb8f93a"
+  },
+  "circuits": {
+    "accountRecord": {
+      "bytes": 6065,
+      "sha256": "2530fca640e76a817c234b84ba4144fe5f2341fcda319e1af3a5c16ce3977ffa"
+    },
+    "depositShielded": {
+      "bytes": 14927,
+      "sha256": "eada91aa306819d4dfd0395b2efb03d882131f33d42f1b8ed34a984e76859cd8"
+    },
+    "depositUnshielded": {
+      "bytes": 4333,
+      "sha256": "29ba8b53bbe4bc233f41f3ab5371c13a11a5698f587554f89b298bedc764ea53"
+    },
+    "execute": {
+      "bytes": 123635,
+      "sha256": "50f09e0b36bb8cf34e6db52fbbff46a4d94746dd4fc10895e8c770c4f26298c0"
+    },
+    "hello_positive_amount": {
+      "bytes": 314,
+      "sha256": "be3bfc7c376b26ef5d5b848a6a0d1650636210176e3cf9c6ffe8ea23bcec91db"
+    },
+    "isRegistered": {
+      "bytes": 786,
+      "sha256": "25eaf82d9391232e00ce0c15e95cbaf004f7acb59d82827c7429be08328bcb0f"
+    },
+    "poolHasColour": {
+      "bytes": 792,
+      "sha256": "55c30b8add242f7093c2e40e2124d02a9f4f3a9d19259736ab142a3ebd7d0709"
+    },
+    "poolValue": {
+      "bytes": 1632,
+      "sha256": "9aeab69ad730f80f747e0fedd5a5301be0e8b7367db6f99af47275366a40dad3"
+    },
+    "shieldedAccountBalance": {
+      "bytes": 1768,
+      "sha256": "132a4afceb81c656d34493c9806a42bb321fe0373341b1bf5bbd4e85c110abdb"
+    },
+    "unshieldedAccountBalance": {
+      "bytes": 1772,
+      "sha256": "e609149de5161522555677b777ba82717d71c5bb0e96afab8acf4c68f214e982"
+    }
+  }
+}

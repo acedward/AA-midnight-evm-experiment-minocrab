@@ -30,16 +30,28 @@ publish = false
 [workspace.dependencies]
 # --- MinoCrab: the third-party Rust eDSL compiler this port is written against ----------------
 #
-# PINNED REV. `6a53f2b54850955406cd0f45dd78cc1e152182c7` is the exact commit every number in the
-# README was measured with. Do not float this to a branch: minocrab is pre-1.0 and an instruction
-# selection change moves the row count, which is the whole point of the measurement.
-minocrab = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
-minocrab-std = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
-minocrab-ledger = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
-minocrab-zkir = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
-minocrab-ir = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
-minocrab-sim = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
-minocrab-abi = { git = "https://github.com/sig-net/minocrab", rev = "6a53f2b54850955406cd0f45dd78cc1e152182c7" }
+# PINNED REV. `1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9` (upstream `main`, 2026-09-02) is the exact
+# commit every number in the README was measured with. Do not float this to a branch: minocrab is
+# pre-1.0 and an instruction selection change moves the row count, which is the whole point of the
+# measurement.
+#
+# Previous pin: `6a53f2b54850955406cd0f45dd78cc1e152182c7`. Moving to `1522f9d` re-emitted every
+# circuit and re-measured all nine; see the README's History section for the before/after table.
+# What did NOT move with it: upstream still pins midnight-ledger rev `04c9c5d9…` and its
+# `[patch.crates-io]` block is byte-identical to the one below (re-checked against that rev's root
+# `Cargo.toml`, 2026-09-04), so the port still links exactly the same upstream code.
+minocrab = { git = "https://github.com/sig-net/minocrab", rev = "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9" }
+minocrab-std = { git = "https://github.com/sig-net/minocrab", rev = "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9" }
+minocrab-ledger = { git = "https://github.com/sig-net/minocrab", rev = "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9" }
+minocrab-zkir = { git = "https://github.com/sig-net/minocrab", rev = "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9" }
+minocrab-ir = { git = "https://github.com/sig-net/minocrab", rev = "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9" }
+# `features = ["unstable"]` since the bump to 1522f9d: upstream's M24 tier boundary
+# (commit 807b9b19) moved the simulator VM — `simulate`, `Run3` and the report machinery, which
+# the differential harness and the EIP-712 fixture suite drive — behind that feature, leaving
+# `cost` / `profile` / `assert_max_k` / `rowcost` as the stable surface. Upstream's own
+# in-workspace crates enable it; this is the same opt-in, not a new dependency.
+minocrab-sim = { git = "https://github.com/sig-net/minocrab", rev = "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9", features = ["unstable"] }
+minocrab-abi = { git = "https://github.com/sig-net/minocrab", rev = "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9" }
 
 # --- Midnight's own crates ---------------------------------------------------------------------
 #

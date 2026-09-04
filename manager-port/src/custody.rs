@@ -1,5 +1,49 @@
-//! Phase 3.4 — `custodyDispatch` (`manager.compact:1001-1135`), the o2 custody mux: one debit leg,
+//! Phase 3.4 — `custodyDispatch` (`contracts/modules/Custody.compact:213-353`), the o2 custody mux: one debit leg,
 //! one credit leg, muxed arguments, for all five custody selectors (2..6).
+//!
+//! **Compact twin**: `contracts/modules/Custody.compact`, THE COMPOSER — the only file that calls
+//! both custody families, the contract's only debit path, and the owner of no ledger field at all.
+//!
+//! **Circuits ported here** (2 of the nine key-emitting circuits): [`deposit_shielded`] and
+//! [`deposit_unshielded`], which in Compact are the preset's public wrappers
+//! (`contracts/manager.compact:288-301`) over this module's `_depositShielded` / `_depositUnshielded`
+//! (`contracts/modules/Custody.compact:100-134`). The wrapper and the internal are one function
+//! here because the wrapper is a single call: splitting them would add a Rust function and change
+//! no emitted byte.
+//!
+//! [`family_key`] is the hash body shared by `ShieldedCustody`'s `shieldedKey`,
+//! `UnshieldedCustody`'s `unshieldedKey` and this module's own `debitKey` / `creditKey`
+//! (`contracts/modules/Custody.compact:250-251`) — three Compact call sites, one helper here.
+//!
+//! The family internals `_credit`, `_writeCell`, `_pooled`, `_sendNamed`, `_releaseOpen`,
+//! `_claimWant` and `_give` are **inlined** into [`custody_dispatch`] rather than given Rust
+//! functions of their own: each runs at exactly one point in the mux, under a guard the dispatch
+//! owns, and the emitted op stream is what has to match. Their Compact homes are cited at the
+//! point of use.
+//!
+//! ## THE TRAP THE TWO DEPOSITS CARRY: compactc inlines, so a doubled call is a doubled hash
+//!
+//! Both deposit circuits end with
+//!
+//! ```compact
+//! xBalances.insert(xKey(acct, col), (xBalanceOf(acct, col) + amt) as Uint<128>);
+//! ```
+//!
+//! and `xBalanceOf` computes `xKey(acct, col)` *again* internally. compactc inlines the call, so
+//! the artifact carries **two identical `persistent_hash` instructions** over the same three words
+//! — the outer key first (it is the insert's first argument, evaluated first), the inner one second
+//! (`depositUnshielded.zkir:44` and `:46`; `depositShielded.zkir:150` and `:152`). Hoisting it to
+//! one hash would be a statement-preserving optimization **compactc did not take**, so it is not
+//! this port's to take either (FR-003: faithful, same structure); the same precedent as
+//! `contracts/modules/AccountRegistry.compact:178`'s double `accountModes.lookup` in `execute`. It
+//! costs rows on both sides equally, which is precisely why leaving it in keeps the comparison
+//! honest.
+//!
+//! They are also the only circuits besides `execute` that WRITE ledger state and touch the zswap /
+//! unshielded kernel, so they are the only non-`execute` rows whose scenarios need the transcript
+//! model Phase 3 built. Everything they need already exists: `receiveShielded` and the family-key
+//! hash below, `receive_unshielded` and `merge_coin_immediate` directly from
+//! `minocrab-std/src/v3/kernel.rs`, `LedgerMap::insert_coin` for the pool write.
 //!
 //! ## What this port is required to preserve, and how it does it
 //!
@@ -29,29 +73,40 @@
 //!
 //! ## The `member ? lookup : 0` idiom
 //!
-//! `shieldedBalanceAt`/`unshieldedBalanceAt` are `member(k) ? lookup(k) : 0`. compactc lowers that
+//! The two families' `_balanceAt` (named `shieldedBalanceAt` / `unshieldedBalanceAt` before the
+//! module split) are `member(k) ? lookup(k) : 0`. compactc lowers that
 //! to a `member` under the ambient guard and a `lookup` under `ambient && member`, whose
 //! `public_input` gates yield the type default when the guard is off. That is exactly
 //! `LedgerMap::lookup_guarded`, and the resulting zero means "the guard was off", which here is the
 //! same thing as "the key was absent" — the FR-204 missing-cell-reads-0 rule, preserved by
 //! construction rather than re-implemented.
 
-use minocrab::v3::{Circuit3, FieldT, Wire3};
-use minocrab::Public;
+use minocrab::v3::{Circuit3, Compiled3, FieldT, Wire3};
+use minocrab::{Alignment, AlignmentAtom, AlignmentSegment, Private, Public};
 use minocrab_std::v3::{
-    is_true, kernel, not, Bool, CoinRecipient, ContractAddress, Either, Uint, UserAddress, B32,
+    circuit, is_true, kernel, not, Bool, CircuitArg, CoinColor, CoinNonce, CoinRecipient,
+    ContractAddress, Disclose, Discloses, Either, ShieldedCoinInfo3, Uint, UserAddress,
+    ZswapCoinPublicKey, B32,
 };
 
-use crate::coins::{
-    contract_recipient, evolve_nonce, family_key, receive_shielded, self_recipient,
-    shielded_family_tag, unshielded_family_tag, POOLS_READ,
-};
-use crate::envelope::Selectors;
-use crate::guards::b32_eq;
+use crate::action_envelope::Selectors;
+use crate::checks::b32_eq;
+use crate::disclosures::{Amount, Coin, Colour, CreditAccount};
 use crate::ledger::MANAGER;
+use crate::shielded_custody::{
+    shielded_balance_at, shielded_balance_of, shielded_family_tag, POOLS_READ,
+};
+use crate::unshielded_custody::{
+    unshielded_balance_at, unshielded_balance_of, unshielded_family_tag,
+};
+use crate::zswap_primitives::{contract_recipient, evolve_nonce, receive_shielded, self_recipient};
 
 /// `a || b` on Booleans, as compactc lowers it: `cond_select(a, 1, b)`.
-fn or(c: &mut Circuit3, a: Wire3<FieldT, Public>, b: Wire3<FieldT, Public>) -> Wire3<FieldT, Public> {
+fn or(
+    c: &mut Circuit3,
+    a: Wire3<FieldT, Public>,
+    b: Wire3<FieldT, Public>,
+) -> Wire3<FieldT, Public> {
     c.cond_select(a, 1u64, b)
 }
 
@@ -62,26 +117,7 @@ fn as_uint128(c: &mut Circuit3, w: Wire3<FieldT, Public>) -> Uint<128, Public> {
     Uint::from_field_unchecked(c.copy(w))
 }
 
-/// `shieldedBalances.member(k) ? shieldedBalances.lookup(k) : 0` (`manager.compact:953-955`).
-fn shielded_balance_at(c: &mut Circuit3, k: &B32<Public>) -> Uint<128, Public> {
-    let present = MANAGER.shielded_balances.member(c, k);
-    // A SCOPE, not `lookup_guarded(c, present, …)`: see F-00012-07 in the module docs. The
-    // scope's guard is `ambient && present`, which is what compactc puts on BOTH the read's gates
-    // and its op.
-    c.when_value(present.field(), |c| MANAGER.shielded_balances.lookup(c, k))
-        .otherwise(|c| Uint::<128, Public>::constant(c, 0))
-        .into_inner()
-}
-
-/// `unshieldedBalances.member(k) ? unshieldedBalances.lookup(k) : 0` (`manager.compact:957-959`).
-fn unshielded_balance_at(c: &mut Circuit3, k: &B32<Public>) -> Uint<128, Public> {
-    let present = MANAGER.unshielded_balances.member(c, k);
-    c.when_value(present.field(), |c| MANAGER.unshielded_balances.lookup(c, k))
-        .otherwise(|c| Uint::<128, Public>::constant(c, 0))
-        .into_inner()
-}
-
-/// The muxed selector algebra of `manager.compact:1003-1020`.
+/// The muxed selector algebra of `contracts/modules/Custody.compact:219-236`.
 struct Mux {
     is_withdraw_shielded: Wire3<FieldT, Public>,
     is_withdraw_unshielded: Wire3<FieldT, Public>,
@@ -116,16 +152,36 @@ impl Mux {
     }
 }
 
-/// `custodyDispatch(p, account)` — the whole custody dispatch for selectors 2..6, with one copy of
-/// every expensive operation.
+/// `custodyDispatch(p, account, toRegistered, creditRegistered)` — the whole custody dispatch for
+/// selectors 2..6, with one copy of every expensive operation
+/// (`contracts/modules/Custody.compact:213-353`).
 ///
 /// The caller wraps this in `c.when(!isRegistration, …)`, which is where `execute` calls it from
-/// (`manager.compact:1352-1355`); every operation below therefore inherits that ambient guard.
+/// (`contracts/manager.compact:378-380`); every operation below therefore inherits that ambient guard.
+///
+/// ## THE REGISTRY-TO-CUSTODY SEAM (product `41de69d`)
+///
+/// `to_registered` and `credit_registered` are `accounts.member(p.toAccount)` and
+/// `accounts.member(p.creditAccount)`, **read by the caller and passed in**. Before the product's
+/// module split this circuit read the set itself, each read short-circuited by the guard of the
+/// assert that consumed it (`isTransfer`, `isSwap`). `Custody.compact` holds no registry state and
+/// a Compact module never resolves caller identity, so the split hoisted both reads into
+/// `manager.compact`'s `execute`, where they are evaluated as ARGUMENTS — unconditionally under the
+/// ambient `!isRegistration` — and asserted here, at the original positions, with the original
+/// messages.
+///
+/// That is a real change to the read schedule, not a rename: the two `member` ops move earlier in
+/// the transcript and lose their inner guards. It is also the whole of the compactc-side
+/// `382,781 → 382,780` delta the product recorded for `execute`. The port follows it because the
+/// port transcribes the contract; the differential suite is what proves the two streams still
+/// agree instruction for instruction.
 pub fn custody_dispatch(
     c: &mut Circuit3,
-    p: &crate::payload::ExecutePayload<Public>,
+    p: &crate::action_envelope::ExecutePayload<Public>,
     s: &Selectors,
     account: &B32<Public>,
+    to_registered: Bool<Public>,
+    credit_registered: Bool<Public>,
 ) {
     c.region("custody dispatch", |c| {
         let m = Mux::of(c, s);
@@ -159,15 +215,13 @@ pub fn custody_dispatch(
         );
 
         // --- 1. internal-transfer destination checks (selectors 4/5), in their product order -----
-        // SHORT-CIRCUIT: the `accounts.member` read only happens under `isTransfer`.
-        let dest_registered = c
-            .when_value(m.is_transfer, |c| MANAGER.accounts.member(c, &p.to_account))
-            .otherwise(|c| Bool::constant(c, false))
-            .into_inner();
+        // THE SEAM: `toRegistered` arrives as an argument (`Custody.compact:244`), so there is no
+        // read to short-circuit here any more. `Check::or` over an already-computed Boolean is
+        // exactly what compactc emits for `!isTransfer || toRegistered`.
         let not_transfer = not(is_true(Bool::from_field_unchecked(m.is_transfer)));
         c.assert(
             not_transfer
-                .or(is_true(dest_registered))
+                .or(is_true(to_registered))
                 .message("destination account is not registered"),
         );
         let not_transfer = not(is_true(Bool::from_field_unchecked(m.is_transfer)));
@@ -210,7 +264,7 @@ pub fn custody_dispatch(
                     .message("pooled colour balance too low"),
             );
 
-            // PR#9 / project 00013 — THE POOL-UNDERFLOW FIX (`manager.compact:1064`).
+            // PR#9 / project 00013 — THE POOL-UNDERFLOW FIX (`contracts/modules/Custody.compact:279`).
             //
             //     const safeGive = (pooled.value >= val ? val : 0) as Uint<128>;
             //
@@ -234,11 +288,8 @@ pub fn custody_dispatch(
             ));
 
             // --- 4. the swap credit target, at its product position: after the pool guard --------
-            // SHORT-CIRCUIT again: the read is guarded by `isSwap`.
-            let credit_registered = c
-                .when_value(m.is_swap, |c| MANAGER.accounts.member(c, &p.credit_account))
-                .otherwise(|c| Bool::constant(c, false))
-                .into_inner();
+            // THE SEAM again: `creditRegistered` was read by the caller
+            // (`Custody.compact:282`), so only the assert is left here.
             let not_swap = not(is_true(Bool::from_field_unchecked(m.is_swap)));
             c.assert(
                 not_swap
@@ -258,12 +309,17 @@ pub fn custody_dispatch(
                 let zero_b32 = B32 { hi: zero, lo: zero };
                 let rcpt = CoinRecipient {
                     is_left: use_left,
-                    left: B32::cond_select(c, use_left, &p.recipient, &zero_b32),
-                    right: B32::cond_select(c, use_left, &zero_b32, &p.recipient),
+                    left: ZswapCoinPublicKey(B32::cond_select(
+                        c,
+                        use_left,
+                        &p.recipient,
+                        &zero_b32,
+                    )),
+                    right: ContractAddress(B32::cond_select(c, use_left, &zero_b32, &p.recipient)),
                 };
                 // PR#9: the give amount is the CLAMPED one.
                 let result = kernel::send_shielded(c, &pooled.as_qualified(), &rcpt, safe_give);
-                crate::coins::repool_or_remove(
+                crate::shielded_custody::repool_or_remove(
                     c,
                     result.change.is_some.field(),
                     &col,
@@ -294,11 +350,11 @@ pub fn custody_dispatch(
                 })
                 .otherwise(|c| {
                     let change_coin = minocrab_std::v3::ShieldedCoinInfo3 {
-                        nonce: evolve_nonce(c, 2, &pooled.nonce),
-                        color: col,
+                        nonce: CoinNonce(evolve_nonce(c, 2, &pooled.nonce)),
+                        color: CoinColor(col),
                         value: change_value.field(),
                     };
-                    let self_recipient = contract_recipient(c, self_addr);
+                    let self_recipient = contract_recipient(c, self_addr.address());
                     let cm = minocrab_std::v3::coin_commitment(c, &change_coin, &self_recipient);
                     kernel::claim_zswap_coin_spend(c, &cm);
                     kernel::claim_zswap_coin_receive(c, &cm);
@@ -311,9 +367,9 @@ pub fn custody_dispatch(
 
         // --- the unshielded give leg (selector 3) ------------------------------------------------
         c.when(m.is_withdraw_unshielded, |c| {
-            let enough = kernel::unshielded_balance_gte(c, col, val);
+            let enough = kernel::unshielded_balance_gte(c, CoinColor(col), val);
             c.assert(is_true(enough).message("contract unshielded balance too low"));
-            // PR#10 / project 00016 — THE RECIPIENT-TAG FIX (`manager.compact:1097-1099`):
+            // PR#10 / project 00016 — THE RECIPIENT-TAG FIX (`contracts/modules/Custody.compact:313-315`):
             //
             //     sendUnshielded(col, val, p.recipientKind == 0
             //       ? right<ContractAddress, UserAddress>(UserAddress{ bytes: p.recipient })
@@ -341,15 +397,13 @@ pub fn custody_dispatch(
                 left: ContractAddress(B32::cond_select(c, kind_nonzero, &p.recipient, &zero_b32)),
                 right: UserAddress(B32::cond_select(c, kind_nonzero, &zero_b32, &p.recipient)),
             };
-            crate::coins::send_unshielded(c, col, val, &recipient);
+            crate::unshielded_custody::send_unshielded(c, col, val, &recipient);
         });
 
         // --- ONE debit write, into the muxed family ----------------------------------------------
         let new_debit = debit_balance.sub_with(c, val, "result of subtraction would be negative");
         c.when(m.debit_shielded, |c| {
-            MANAGER
-                .shielded_balances
-                .insert(c, &debit_key, &new_debit);
+            MANAGER.shielded_balances.insert(c, &debit_key, &new_debit);
         })
         .otherwise(|c| {
             MANAGER
@@ -360,8 +414,8 @@ pub fn custody_dispatch(
         // --- the swap WANT leg: claim `wantCoin` into custody ------------------------------------
         c.when(m.is_swap, |c| {
             let want_coin = minocrab_std::v3::ShieldedCoinInfo3 {
-                nonce: p.want_nonce,
-                color: p.want_color,
+                nonce: CoinNonce(p.want_nonce),
+                color: CoinColor(p.want_color),
                 value: p.want_amount.field(),
             };
             receive_shielded(c, &want_coin);
@@ -403,7 +457,8 @@ pub fn custody_dispatch(
                 let next = as_uint128(c, sum);
                 MANAGER.unshielded_balances.insert(c, &credit_key, &next);
             });
-        });    })
+        });
+    })
 }
 
 /// `right<ZswapCoinPublicKey, ContractAddress>(kernel.self())` with its OWN read — the shape
@@ -411,3 +466,182 @@ pub fn custody_dispatch(
 fn self_recipient_fresh(c: &mut Circuit3) -> CoinRecipient<Public> {
     self_recipient(c)
 }
+
+/// The alignment of `Vector<3, Bytes<32>>` — what `shieldedKey`/`unshieldedKey` and
+/// `custodyDispatch`'s muxed `debitKey`/`creditKey` all hash under.
+fn three_words() -> Alignment {
+    Alignment(vec![
+        AlignmentSegment::Atom(AlignmentAtom::Bytes { length: 32 }),
+        AlignmentSegment::Atom(AlignmentAtom::Bytes { length: 32 }),
+        AlignmentSegment::Atom(AlignmentAtom::Bytes { length: 32 }),
+    ])
+}
+
+/// `persistentHash<Vector<3, Bytes<32>>>([acct, colour, tag])` — the body of `shieldedKey`,
+/// `unshieldedKey` and the mux's one key derivation
+/// (`contracts/modules/ShieldedCustody.compact:99-101`,
+/// `contracts/modules/UnshieldedCustody.compact:67-69`, `contracts/modules/Custody.compact:250-251`).
+pub fn family_key(
+    c: &mut Circuit3,
+    acct: &B32<Public>,
+    colour: &B32<Public>,
+    tag: &B32<Public>,
+) -> B32<Public> {
+    let digest = c.persistent_hash(
+        three_words(),
+        &[
+            acct.hi.erase(),
+            acct.lo.erase(),
+            colour.hi.erase(),
+            colour.lo.erase(),
+            tag.hi.erase(),
+            tag.lo.erase(),
+        ],
+    );
+    B32::from_typed(c, digest)
+}
+
+/// `struct ShieldedCoinInfo` as `depositShielded`'s first argument.
+///
+/// **Not `ShieldedCoinInfo3` itself:** minocrab has no `CircuitArg` impl for it (the trait is
+/// implemented for the leaves, `[T; N]`, `Maybe` and `Either`, not for the coin structs), and
+/// `#[circuit]` can only declare arguments through that trait. A local mirror with
+/// `#[derive(CircuitArg)]` gives the identical slot layout — nonce (2), color (2), value (1) — which
+/// the artifact pins as `%coin.0..4` with `constrain_bits` 8/248/8/248/**128**
+/// (`depositShielded.zkir:16-20`). The same expressiveness gap as F-00012-06, and the same cost:
+/// zero rows, zero statement change, only the spelling.
+#[derive(CircuitArg)]
+pub struct DepositCoin<V: minocrab_std::v3::Vis3> {
+    pub nonce: B32<V>,
+    pub color: B32<V>,
+    pub value: Uint<128, V>,
+}
+
+impl DepositCoin<Public> {
+    /// The same value as minocrab's own coin type, so the kernel gadgets can take it.
+    fn as_coin(&self) -> ShieldedCoinInfo3<Public> {
+        ShieldedCoinInfo3 {
+            nonce: CoinNonce(self.nonce),
+            color: CoinColor(self.color),
+            value: self.value.field(),
+        }
+    }
+}
+
+/// `export circuit depositShielded(coin: ShieldedCoinInfo, account: Bytes<32>): []`
+/// (`contracts/modules/Custody.compact:100-111`)
+///
+/// ```compact
+/// const c = disclose(coin);
+/// const acct = disclose(account);
+/// assert(c.value > 0, "deposit must be positive");
+/// assert(accounts.member(acct), "credit account is not registered");
+/// receiveShielded(c);
+/// if (pools.member(c.color)) {
+///   pools.insertCoin(c.color, mergeCoinImmediate(pools.lookup(c.color), c), right(kernel.self()));
+/// } else {
+///   pools.insertCoin(c.color, c, right(kernel.self()));
+/// }
+/// shieldedBalances.insert(shieldedKey(acct, c.color), (shieldedBalanceOf(acct, c.color) + c.value) as Uint<128>);
+/// ```
+///
+/// Every guard precedes every write, so a refusal creates nothing (FR-202) — preserved literally.
+#[circuit]
+pub fn deposit_shielded(
+    c: &mut Circuit3,
+    coin: DepositCoin<Private>,
+    account: B32<Private>,
+) -> Discloses<(Coin, CreditAccount)> {
+    let coin = DepositCoin::<Public> {
+        nonce: coin.nonce.disclose_as::<Coin>(c),
+        color: coin.color.disclose_as::<Coin>(c),
+        value: Uint::from_field_unchecked(coin.value.field().disclose_as::<Coin>(c)),
+    };
+    let acct = account.disclose_as::<CreditAccount>(c);
+
+    c.assert(coin.value.gt(0u64).message("deposit must be positive"));
+    let registered = MANAGER.accounts.member(c, &acct);
+    c.assert(is_true(registered).message("credit account is not registered"));
+
+    // Must precede insertCoin: this is what allocates the Merkle-tree index.
+    let info = coin.as_coin();
+    receive_shielded(c, &info);
+
+    // `if (pools.member(c.color)) { merge } else { first credit }` — both arms are compiled, each
+    // under its own guard, exactly as Compact does.
+    let pooled = MANAGER.pools.member(c, &coin.color);
+    c.when(pooled.field(), |c| {
+        // A SCOPE, so the `lookup`'s gates and its op carry the same wire (F-00012-07).
+        let existing = POOLS_READ.lookup(c, &coin.color);
+        let merged = kernel::merge_coin_immediate(c, &existing.as_qualified(), &info);
+        let recipient = self_recipient(c);
+        MANAGER
+            .pools
+            .insert_coin(c, &coin.color, &merged, &recipient);
+    })
+    .otherwise(|c| {
+        // FIRST CREDIT of this colour — the pool is created lazily, right here.
+        let recipient = self_recipient(c);
+        MANAGER.pools.insert_coin(c, &coin.color, &info, &recipient);
+    });
+
+    // The doubled key hash — see the module docs. The insert's key argument is evaluated first.
+    let tag = shielded_family_tag(c);
+    let key = family_key(c, &acct, &coin.color, &tag);
+    let credited = {
+        let held = shielded_balance_of(c, &acct, &coin.color);
+        let sum = c.add(held.field(), coin.value.field());
+        let w = Uint::<128, Public>::from_field_unchecked(sum);
+        w.constrain_input(c);
+        Uint::<128, Public>::from_field_unchecked(c.copy(sum))
+    };
+    MANAGER.shielded_balances.insert(c, &key, &credited);
+
+    Discloses::of(())
+}
+
+/// `export circuit depositUnshielded(colour: Bytes<32>, amount: Uint<128>, account: Bytes<32>): []`
+/// (`contracts/modules/Custody.compact:120-134`)
+///
+/// ```compact
+/// const col = disclose(colour); const amt = disclose(amount); const acct = disclose(account);
+/// assert(amt > 0, "deposit must be positive");
+/// assert(accounts.member(acct), "credit account is not registered");
+/// receiveUnshielded(col, amt);
+/// unshieldedBalances.insert(unshieldedKey(acct, col), (unshieldedBalanceOf(acct, col) + amt) as Uint<128>);
+/// ```
+///
+/// The tightest circuit in the contract: 7,918 of 8,192 rows at k=13, 3.3% headroom.
+#[circuit]
+pub fn deposit_unshielded(
+    c: &mut Circuit3,
+    colour: B32<Private>,
+    amount: Uint<128, Private>,
+    account: B32<Private>,
+) -> Discloses<(Colour, Amount, CreditAccount)> {
+    let col = colour.disclose_as::<Colour>(c);
+    let amt = Uint::<128, Public>::from_field_unchecked(amount.field().disclose_as::<Amount>(c));
+    let acct = account.disclose_as::<CreditAccount>(c);
+
+    c.assert(amt.gt(0u64).message("deposit must be positive"));
+    let registered = MANAGER.accounts.member(c, &acct);
+    c.assert(is_true(registered).message("credit account is not registered"));
+
+    kernel::receive_unshielded(c, CoinColor(col), amt);
+
+    let tag = crate::unshielded_custody::unshielded_family_tag(c);
+    let key = family_key(c, &acct, &col, &tag);
+    let credited = {
+        let held = unshielded_balance_of(c, &acct, &col);
+        let sum = c.add(held.field(), amt.field());
+        let w = Uint::<128, Public>::from_field_unchecked(sum);
+        w.constrain_input(c);
+        Uint::<128, Public>::from_field_unchecked(c.copy(sum))
+    };
+    MANAGER.unshielded_balances.insert(c, &key, &credited);
+
+    Discloses::of(())
+}
+
+/// Silence the unused-import lint when the macro expansion does not need `Compiled3` by name.
+const _: fn() -> Compiled3 = deposit_shielded;

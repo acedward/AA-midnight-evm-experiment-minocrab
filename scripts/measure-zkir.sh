@@ -9,11 +9,18 @@
 # MEASUREMENT-ONLY. `mock-compile` reports (k, rows) and writes a transient BZKIR;
 # it never generates a prover or verifier key.
 #
-# The image is overridable:
-#   COMPACTC_IMAGE   docker image (or image@sha256:...) providing the pinned toolchain. The default
-#                    below is the exact locally-built image every published number was measured
-#                    with (Compact 0.33.0 / language 0.25.0 / --feature-zkir-v3); it is NOT
-#                    publicly pullable, so set this to your own compactc 0.33.0 image.
+# The toolchain comes from `scripts/toolchain.sh`: the pinned `aa-compactc:0.34.0` (compiler
+# 0.34.0 / language 0.26.0), obtained from a local image, a published cache, or a SHA-256-verified
+# build of `docker/compactc.Dockerfile`, and verified by version and by both binary hashes before
+# anything is measured.
+#
+# MEASURED, 2026-09-04: the 0.34.0 `zkir-v3` (`6a913084…`) reports the same (k, rows) and writes a
+# byte-identical `.bzkir` for every one of the port's nine ZKIRs as the 0.33.0 `zkir-v3`
+# (`75153f47…`) did — `execute` at k=18 / 211,056 rows included. The toolchain move did not move
+# the oracle.
+#
+#   COMPACTC_IMAGE   OPTIONAL override, for re-measuring on another build of the toolchain. The
+#                    version and both binary hashes are still verified, so a mismatch fails hard.
 #
 # usage: measure-zkir.sh <zkir-dir> <circuit-name> <confirmed-free-marker-port> [timeout-seconds=900] [tag]
 set -euo pipefail
@@ -29,7 +36,11 @@ marker_port="$3"
 timeout_seconds="${4:-900}"
 tag="${5:-measure}"
 
-image="${COMPACTC_IMAGE:-aa00006-compactc@sha256:f57ca2d88cec1c66f377eb8bb2d616779202dd1ccb99517a4f7ddfffa9d0d86b}"
+# The pinned Compact toolchain — the same file compile-baseline.sh and keygen-zkir.sh source, so
+# all three drive byte-identical binaries. `ensure_image` is called in the header block below.
+# shellcheck source=scripts/toolchain.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/toolchain.sh"
+
 input_zkir="$zkir_dir/$circuit.zkir"
 output_bzkir="$zkir_dir/$circuit.bzkir"
 safe_tag="$(printf '%s-%s' "$tag" "$circuit" | tr '[:upper:]/' '[:lower:]-')"
@@ -44,7 +55,7 @@ if lsof -nP -iTCP:"$marker_port" -sTCP:LISTEN >/dev/null 2>&1 || \
   exit 98
 fi
 
-watchdog_flag="$(mktemp -t minocrab-port-measure-watchdog)"
+watchdog_flag="$(mktemp "${TMPDIR:-/tmp}/minocrab-port-measure-watchdog.XXXXXX")"
 rm -f "$watchdog_flag"
 
 cleanup() {
@@ -61,7 +72,8 @@ echo "ZKIR_DIR=$zkir_dir"
 echo "CIRCUIT=$circuit"
 echo "MARKER_PORT=$marker_port"
 echo "BOUNDS=cpus:2,memory:8g,memory-swap:8g,rayon:2,wall-seconds:$timeout_seconds,network:none"
-echo "IMAGE=$image"
+ensure_image
+image="$COMPACTC_IMAGE"
 echo "ZKIR_BYTES=$(wc -c < "$input_zkir" | tr -d ' ')"
 echo "ZKIR_SHA256=$(shasum -a 256 "$input_zkir" | cut -d ' ' -f 1)"
 

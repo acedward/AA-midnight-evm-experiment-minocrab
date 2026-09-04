@@ -89,8 +89,9 @@ fn assert_schema_identity(ours: &IrSource, theirs: &IrSource) {
 
 /// Clause 2: PI-vector identity on a shared preimage.
 fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, what: &str) {
-    let their_run = simulate(theirs, pi)
-        .unwrap_or_else(|e| panic!("{what}: the compactc artifact rejected the synthesized preimage: {e}"));
+    let their_run = simulate(theirs, pi).unwrap_or_else(|e| {
+        panic!("{what}: the compactc artifact rejected the synthesized preimage: {e}")
+    });
     let our_run = simulate(ours, pi).unwrap_or_else(|e| {
         panic!(
             "{what}: THE PORT REJECTED a preimage the compactc artifact accepts.\n  {e}\n\
@@ -111,9 +112,16 @@ fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, wh
         .zip(their_run.pi_skips.iter())
         .enumerate()
     {
-        assert_eq!(a, b, "{what}: pi_skips differ at Impact {i}: port {a:?} vs compactc {b:?}");
+        assert_eq!(
+            a, b,
+            "{what}: pi_skips differ at Impact {i}: port {a:?} vs compactc {b:?}"
+        );
     }
-    assert_eq!(our_run.pis.len(), their_run.pis.len(), "{what}: PI vector lengths differ");
+    assert_eq!(
+        our_run.pis.len(),
+        their_run.pis.len(),
+        "{what}: PI vector lengths differ"
+    );
     for (i, (a, b)) in our_run.pis.iter().zip(their_run.pis.iter()).enumerate() {
         assert_eq!(a, b, "{what}: PI vectors differ at element {i}");
     }
@@ -125,7 +133,9 @@ fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, wh
         "{what}: upstream check() disagrees with the simulation on the port"
     );
     assert_eq!(
-        theirs.check(pi).expect("upstream accepts the compactc artifact"),
+        theirs
+            .check(pi)
+            .expect("upstream accepts the compactc artifact"),
         their_run.pi_skips,
         "{what}: upstream check() disagrees with the simulation on the compactc artifact"
     );
@@ -133,7 +143,12 @@ fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, wh
 
 /// Clause 3: every single-element mutation of the preimage must be judged the same way by both
 /// artifacts. Zero acceptance disagreements is the assertion.
-fn assert_tamper_agreement(ours: &IrSource, theirs: &IrSource, base: &ProofPreimage, what: &str) -> usize {
+fn assert_tamper_agreement(
+    ours: &IrSource,
+    theirs: &IrSource,
+    base: &ProofPreimage,
+    what: &str,
+) -> usize {
     let mut checked = 0usize;
     let mut disagreements = Vec::new();
 
@@ -234,7 +249,11 @@ fn a_colour() -> [u8; 32] {
 /// A signature that is well-formed but not over anything in particular — enough for the paths where
 /// the ECDSA result is never asserted on (`authMode == 0`), where the contract still runs the
 /// verification straight-line because the pinned backend cannot lower a guarded secp operation.
-fn dummy_signature() -> (minocrab_zkir::v3::IrValue, minocrab_zkir::v3::IrValue, minocrab_zkir::v3::IrValue) {
+fn dummy_signature() -> (
+    minocrab_zkir::v3::IrValue,
+    minocrab_zkir::v3::IrValue,
+    minocrab_zkir::v3::IrValue,
+) {
     sign(&[7u8; 32], &scalar(0x5eed), &scalar(0xf00d))
 }
 
@@ -252,8 +271,8 @@ fn native_registration() -> Scenario {
     // 6. `registerAccount(account, 0)`:
     reads.bool(false); //   `accounts.member(account)`      — not yet registered
     reads.bool(false); //   `accountModes.member(account)`  — no mode collision
-    // 7. `custodyDispatch` — OFF: `!isRegistration` is false.
-    // 8. `evmNonces.insert` — OFF: `isEvmAuthorized` is false.
+                       // 7. `custodyDispatch` — OFF: `!isRegistration` is false.
+                       // 8. `evmNonces.insert` — OFF: `isEvmAuthorized` is false.
     Scenario {
         name: "selector 0 — native registration",
         payload: Payload {
@@ -301,9 +320,28 @@ fn native_auth_reads(reads: &mut Reads) {
     reads.bool(true); // `accounts.member(nativeAccount)`
     reads.bool(true); // `accountModes.member(nativeAccount)`
     reads.u8(0); //     `accountModes.lookup(acct)`  — `== 0`, native mode
-    reads.u8(0); //     `accountModes.lookup(acct)`  — re-read at manager.compact:872
+    reads.u8(0); //     `accountModes.lookup(acct)`  — re-read at contracts/modules/AccountRegistry.compact:178
     reads.bool(false); // `evmOwners.member(acct)`
     reads.bool(false); // `evmNonces.member(acct)` — reached because `!evmOwners.member` held
+}
+
+/// THE REGISTRY-TO-CUSTODY SEAM — the two reads `execute` makes for `custodyDispatch`
+/// (`contracts/manager.compact:378-380`), in argument order.
+///
+/// These belong to EVERY non-registration selector since the product's module split. Before it,
+/// `custodyDispatch` read the set itself and each read was short-circuited by the guard of the
+/// assert that consumed it, so `accounts.member(p.toAccount)` appeared only under `isTransfer` and
+/// `accounts.member(p.creditAccount)` only under `isSwap` — and each sat at the assert's position
+/// in the stream, not here. `Custody.compact` holds no registry state, so both are now read by the
+/// caller, unconditionally under `!isRegistration`, before anything custody does. That move is the
+/// whole of the compactc-side `382,781 → 382,780` delta.
+///
+/// The two answers are the membership of `p.toAccount` and `p.creditAccount`, whatever the selector
+/// does with them: a withdrawal leaves both at `default<Bytes<32>>`, which is not a registered
+/// account, so it reads `false` twice and asserts on neither.
+fn seam_registry_reads(reads: &mut Reads, to_registered: bool, credit_registered: bool) {
+    reads.bool(to_registered); //     `isRegistered(p.toAccount)`
+    reads.bool(credit_registered); // `isRegistered(p.creditAccount)`
 }
 
 /// Selector 3 — withdraw unshielded, native authorization.
@@ -314,11 +352,12 @@ fn withdraw_unshielded_native() -> Scenario {
     reads.b32(&self_addr()); //         `kernel.self()`
     reads.b32(&deployment_domain()); // `deploymentDomain` — selector != 0
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false); // both accounts are `default<Bytes<32>>`
     reads.bool(true); //   `unshieldedBalances.member(debitKey)` — the muxed family is unshielded
     reads.u128(1_000); //  `unshieldedBalances.lookup(debitKey)`
     reads.bool(false); //  `unshieldedBalance(col) < val` — the contract holds enough
-    //  `is_self` reads nothing: after PR#10 `recipientKind == 0` is the UserAddress (RIGHT) arm,
-    //  so `is_left` is 0 and the auto-receive `kernel.self()` read is guarded off.
+                       //  `is_self` reads nothing: after PR#10 `recipientKind == 0` is the UserAddress (RIGHT) arm,
+                       //  so `is_left` is 0 and the auto-receive `kernel.self()` read is guarded off.
     Scenario {
         name: "selector 3 — withdraw unshielded, native",
         payload: Payload {
@@ -349,6 +388,7 @@ fn withdraw_shielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false); // both accounts are `default<Bytes<32>>`
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(true); //  `pools.member(col)`
@@ -385,7 +425,8 @@ fn transfer_shielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
-    reads.bool(true); //  `accounts.member(p.toAccount)` — reached because `isTransfer` held
+    // `p.toAccount` is registered; `p.creditAccount` is unused by a transfer and stays default.
+    seam_registry_reads(&mut reads, true, false);
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(false); // `shieldedBalances.member(creditKey)` — a fresh credit cell
@@ -416,7 +457,7 @@ fn transfer_unshielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
-    reads.bool(true); //  `accounts.member(p.toAccount)`
+    seam_registry_reads(&mut reads, true, false);
     reads.bool(true); //  `unshieldedBalances.member(debitKey)`
     reads.u128(1_000); // `unshieldedBalances.lookup(debitKey)`
     reads.bool(false); // `unshieldedBalances.member(creditKey)`
@@ -455,11 +496,12 @@ fn open_swap_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    // A swap uses `p.creditAccount`, which is registered; `p.toAccount` stays default.
+    seam_registry_reads(&mut reads, false, true);
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(true); //  `pools.member(col)`
     reads.coin(&[9u8; 32], &a_colour(), 5_000, 0); // `pools.lookup(col)`
-    reads.bool(true); //  `accounts.member(p.creditAccount)` — reached because `isSwap` held
     reads.b32(&self_addr()); // the open leg's `kernel.self()`
     reads.b32(&self_addr()); // the change coin's `insertCoin(… right(kernel.self()))`
     reads.b32(&self_addr()); // `receiveShielded`'s `kernel.self()`
@@ -649,7 +691,10 @@ fn pr10_envelope_refuses_the_contract_recipient_shapes() {
     for sc in [withdraw, swap] {
         let (partial, err) = support::synth::synthesize_partial(&theirs, &sc.preimage());
         let err = err.unwrap_or_else(|| {
-            panic!("{}: the compactc artifact ACCEPTED a shape PR#10 forbids", sc.name)
+            panic!(
+                "{}: the compactc artifact ACCEPTED a shape PR#10 forbids",
+                sc.name
+            )
         });
         assert!(
             err.contains("(assert): failed direct assertion"),
@@ -689,7 +734,11 @@ fn signer_address() -> [u8; 20] {
 /// Sign the EIP-712 digest this payload commits to under `manager` / `domain`.
 fn sign_payload(
     payload: &Payload,
-) -> (minocrab_zkir::v3::IrValue, minocrab_zkir::v3::IrValue, minocrab_zkir::v3::IrValue) {
+) -> (
+    minocrab_zkir::v3::IrValue,
+    minocrab_zkir::v3::IrValue,
+    minocrab_zkir::v3::IrValue,
+) {
     let manager = self_addr();
     let sep = domain_separator(&manager, &deployment_domain());
     let digest = eip712_digest(&sep, &payload.struct_hash(&manager));
@@ -777,6 +826,7 @@ fn withdraw_shielded_evm() -> Scenario {
     reads.bytes20(&owner); // `evmOwners.lookup(p.account)`
     reads.u64(5); //       `evmNonces.lookup(p.account)`
     live_deadline_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false); // both accounts are `default<Bytes<32>>`
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(true); //  `pools.member(col)`
@@ -836,11 +886,11 @@ fn open_swap_merging() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, true);
     reads.bool(true);
     reads.u128(1_000);
     reads.bool(true);
     reads.coin(&[9u8; 32], &a_colour(), 5_000, 0);
-    reads.bool(true); //     `accounts.member(p.creditAccount)`
     reads.b32(&self_addr()); // the open leg's `kernel.self()`
     reads.b32(&self_addr()); // the change coin's `insertCoin`
     reads.b32(&self_addr()); // `receiveShielded`'s `kernel.self()`
@@ -881,11 +931,11 @@ fn named_swap() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, true);
     reads.bool(true);
     reads.u128(1_000);
     reads.bool(true);
     reads.coin(&[9u8; 32], &a_colour(), 5_000, 0);
-    reads.bool(true); //     `accounts.member(p.creditAccount)`
     reads.b32(&self_addr()); // `sendShielded`'s `kernel.self()` — the NAMED arm this time
     reads.b32(&self_addr()); // `repoolOrRemove`'s `insertCoin`
     reads.b32(&self_addr()); // `receiveShielded`'s `kernel.self()`
@@ -926,12 +976,13 @@ fn withdraw_shielded_emptying_the_pool() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false);
     reads.bool(true);
     reads.u128(1_000);
     reads.bool(true);
     reads.coin(&[9u8; 32], &a_colour(), 100, 0); // pooled value == primaryAmount
     reads.b32(&self_addr()); // `sendShielded`'s `kernel.self()`
-    //  no `insertCoin` read: the change is zero, so the colour leaves the map instead.
+                             //  no `insertCoin` read: the change is zero, so the colour leaves the map instead.
     Scenario {
         name: "selector 2 — withdraw shielded, pool emptied (removal arm)",
         payload: Payload {
@@ -984,11 +1035,15 @@ fn execute_withdraw_shielded_emptying_the_pool() {
 
 use support::replay;
 
-/// Field indices, from the ledger block's declaration order.
-const F_ACCOUNTS: usize = 1;
-const F_ACCOUNT_MODES: usize = 4;
-const F_EVM_OWNERS: usize = 5;
-const F_EVM_NONCES: usize = 6;
+/// Field indices, **derived from the port's own ledger block** (`manager_port::ledger::slot`)
+/// rather than written out, so the module split's renumbering reached them by rebuilding.
+const F_ACCOUNTS: usize = manager_port::ledger::slot::ACCOUNTS as usize;
+const F_ACCOUNT_MODES: usize = manager_port::ledger::slot::ACCOUNT_MODES as usize;
+const F_EVM_OWNERS: usize = manager_port::ledger::slot::EVM_OWNERS as usize;
+const F_EVM_NONCES: usize = manager_port::ledger::slot::EVM_NONCES as usize;
+const F_POOLS: usize = manager_port::ledger::slot::POOLS as usize;
+const F_SHIELDED_BALANCES: usize = manager_port::ledger::slot::SHIELDED_BALANCES as usize;
+const F_UNSHIELDED_BALANCES: usize = manager_port::ledger::slot::UNSHIELDED_BALANCES as usize;
 
 /// Decode the accepted run's transcript, check it re-encodes exactly, and run it.
 fn replay_accepted(
@@ -1000,8 +1055,12 @@ fn replay_accepted(
     let pi = synthesize(&theirs, &scenario.preimage())
         .unwrap_or_else(|e| panic!("{}: {e}", scenario.name));
 
-    let ops = replay::decode_ops(&pi.public_transcript_inputs)
-        .unwrap_or_else(|e| panic!("{}: the transcript is not a well-formed op stream: {e}", scenario.name));
+    let ops = replay::decode_ops(&pi.public_transcript_inputs).unwrap_or_else(|e| {
+        panic!(
+            "{}: the transcript is not a well-formed op stream: {e}",
+            scenario.name
+        )
+    });
     replay::assert_round_trip(&ops, &pi.public_transcript_inputs);
 
     let executed = replay::run(pre, &self_addr(), block_time_secs, &ops).unwrap_or_else(|e| {
@@ -1111,11 +1170,11 @@ fn replay_withdraw_shielded_emptying_the_pool() {
     let out = replay_accepted(&sc, &pre, 0);
 
     assert!(
-        !replay::map_member(&out.post, 0, &a_colour()),
+        !replay::map_member(&out.post, F_POOLS, &a_colour()),
         "the colour must leave `pools` entirely when the pooled coin is fully spent"
     );
     assert_eq!(
-        replay::map_get_uint(&out.post, 2, &debit_key),
+        replay::map_get_uint(&out.post, F_SHIELDED_BALANCES, &debit_key),
         Some(900),
         "the per-(account, colour) cell must be debited by the withdrawn amount"
     );
@@ -1179,7 +1238,7 @@ fn replay_withdraw_unshielded_native() {
     let out = replay_accepted(&sc, &pre, 0);
 
     assert_eq!(
-        replay::map_get_uint(&out.post, 3, &debit_key),
+        replay::map_get_uint(&out.post, F_UNSHIELDED_BALANCES, &debit_key),
         Some(900),
         "the per-(account, colour) unshielded cell must be debited by the withdrawn amount"
     );
@@ -1197,7 +1256,10 @@ fn replay_withdraw_unshielded_native() {
         seen.push((key.into_inner().1, amount));
     }
     let (addr, amount) = seen.pop().expect("one claimed spend");
-    assert_eq!(amount, 100, "the claimed amount must be the withdrawn amount");
+    assert_eq!(
+        amount, 100,
+        "the claimed amount must be the withdrawn amount"
+    );
     assert_eq!(
         addr,
         PublicAddress::User(UserAddress(midnight_base_crypto::hash::HashOutput(

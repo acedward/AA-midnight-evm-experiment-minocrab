@@ -21,11 +21,15 @@
 #   generated/zk-params/    the Midnight SRS (`bls_midnight_2p18` for a k=18 circuit). Placed there
 #                           by you; the container is `--network none` and cannot fetch it.
 #
-# The image is overridable:
-#   COMPACTC_IMAGE   docker image (or image@sha256:...) providing the pinned toolchain. The default
-#                    below is the exact locally-built image every published number was measured
-#                    with (Compact 0.33.0 / language 0.25.0 / --feature-zkir-v3); it is NOT
-#                    publicly pullable, so set this to your own compactc 0.33.0 image.
+# The toolchain comes from `scripts/toolchain.sh`: the pinned `aa-compactc:0.34.0` (compiler
+# 0.34.0 / language 0.26.0), obtained from a local image, a published cache, or a SHA-256-verified
+# build of `docker/compactc.Dockerfile`, and verified by version and by both binary hashes before
+# any key material is produced. KEYS INHERIT THAT PROVENANCE: a key pair is only as identifiable as
+# the `zkir-v3` that made it, which is why the verification is unconditional and a mismatch exits
+# 70 rather than warning.
+#
+#   COMPACTC_IMAGE   OPTIONAL override, for keying on another build of the toolchain. The version
+#                    and both binary hashes are still verified, so a mismatch fails hard.
 #
 # usage: keygen-zkir.sh <arm-name> <zkir-path> <confirmed-free-marker-port>
 set -euo pipefail
@@ -40,7 +44,12 @@ zkir="$2"
 marker_port="$3"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-image="${COMPACTC_IMAGE:-aa00006-compactc@sha256:f57ca2d88cec1c66f377eb8bb2d616779202dd1ccb99517a4f7ddfffa9d0d86b}"
+
+# The pinned Compact toolchain — the same file compile-baseline.sh and measure-zkir.sh source.
+# `ensure_image` is called in the header block below, before any key work begins.
+# shellcheck source=scripts/toolchain.sh
+. "$repo_root/scripts/toolchain.sh"
+
 out_dir="$repo_root/generated/keys/$name"
 params_dir="$repo_root/generated/zk-params"
 container="minocrab-port-keygen-${name}"
@@ -79,7 +88,7 @@ mkdir -p "$zkir_dir"
 cp "$zkir" "$zkir_dir/$zkir_base"
 chmod u+w "$zkir_dir/$zkir_base"
 
-watchdog_flag="$(mktemp -t minocrab-port-keygen-watchdog)"
+watchdog_flag="$(mktemp "${TMPDIR:-/tmp}/minocrab-port-keygen-watchdog.XXXXXX")"
 rm -f "$watchdog_flag"
 
 cleanup() {
@@ -102,7 +111,8 @@ echo "ZKIR_STAGED_SHA256=$(shasum -a 256 "$zkir_dir/$zkir_base" | cut -d ' ' -f 
 echo "MARKER_PORT=$marker_port"
 echo "BOUNDS=cpus:$cpus,memory:$memory,memory-swap:$memory,wall-seconds:$timeout_seconds,network:none"
 echo "ATTEMPTS_AUTHORIZED=1"
-echo "IMAGE=$image"
+ensure_image
+image="$COMPACTC_IMAGE"
 echo "TOOL=/opt/compactc/zkir-v3 compile"
 echo "DOCKER_VM_MEMTOTAL=$(docker info --format '{{.MemTotal}}')"
 echo "DOCKER_VM_NCPU=$(docker info --format '{{.NCPU}}')"

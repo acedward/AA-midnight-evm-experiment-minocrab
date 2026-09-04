@@ -1,13 +1,21 @@
 //! Phase 3.1 — leaf helpers: constants and the big-endian EVM word encoders.
 //!
+//! **Compact twin**: `contracts/modules/ByteCodec.compact`. **Circuits ported here: none** — every
+//! circuit in that module is `pure`, emits no key, and is not among the nine provable circuits;
+//! what is here is what the provable ones call. `bytes32LexicographicLt` is not transcribed: its
+//! only consumer is `SemanticCommitment`, which this crate does not port.
+//! `reverseBytes16` is not a separate function here — [`reverse_bytes32`] is the whole family,
+//! and [`numeric_word`] covers `uint8Word` / `uint64Word` / `uint128Word` at once, for the reason
+//! its own doc comment gives.
+//!
 //! These are the bottom of the `execute` port. They are also **where the row win is**: the
 //! compactc artifact spends 3,140 of `execute`'s 5,780 instructions on `div_mod_power_of_two` /
 //! `reconstitute_field` chains (54.3%), which is what the per-byte `Bytes[...]` permutations in
-//! `manager.compact:358-420` lower to. ZKIR has a native `ReverseBytes`, so each of these encoders
+//! `contracts/modules/ByteCodec.compact:30-87` lower to. ZKIR has a native `ReverseBytes`, so each of these encoders
 //! becomes one instruction instead of a chain.
 //!
 //! **Faithfulness (FR-003).** Same bytes out, no statement change. The contract's own comment
-//! (`manager.compact:390-394`) proves the byte equality it relies on: `v as Bytes<N>` is
+//! (`contracts/modules/ByteCodec.compact:52-62`) proves the byte equality it relies on: `v as Bytes<N>` is
 //! little-endian, so a value's LE bytes reversed inside a 32-byte string *are* its big-endian
 //! 32-byte rendering. That is exactly what `reverse_bytes` computes, so the port takes the same
 //! bytes by a cheaper route — the definition of an allowed instruction-selection win.
@@ -37,7 +45,7 @@ pub fn reverse_bytes32<V: Vis3>(c: &mut Circuit3, b: &B32<V>) -> B32<V> {
 
 /// The 32-byte **big-endian** rendering of an integer that fits in 248 bits.
 ///
-/// This is `uint64Word` / `uint128Word` / `uint8Word` (`manager.compact:398-416`) — all three are
+/// This is `uint64Word` / `uint128Word` / `uint8Word` (`contracts/modules/ByteCodec.compact:63-81`) — all three are
 /// the same operation at different widths, because each places the value's LE bytes reversed at
 /// the tail of an otherwise-zero 32-byte string:
 ///
@@ -55,12 +63,15 @@ pub fn reverse_bytes32<V: Vis3>(c: &mut Circuit3, b: &B32<V>) -> B32<V> {
 /// type is what guarantees the bound (`Uint<64>` *is* `assert_bits(w, 64)`).
 pub fn numeric_word<V: Vis3>(c: &mut Circuit3, value: Wire3<FieldT, V>) -> B32<V> {
     let zero = V::from_public(c.constant(0u64));
-    let padded = B32 { hi: zero, lo: value };
+    let padded = B32 {
+        hi: zero,
+        lo: value,
+    };
     reverse_bytes32(c, &padded)
 }
 
 /// `addressWord(value: Bytes<20>)` — 12 zero bytes then the 20 address bytes in display order
-/// (`manager.compact:418-420`).
+/// (`contracts/modules/ByteCodec.compact:85-87`).
 ///
 /// A `Bytes<20>` is a single 160-bit limb whose bytes are already in display order at string
 /// positions 0..19. The word wants them at 12..31, i.e. shifted up by 12 bytes — but a limb only

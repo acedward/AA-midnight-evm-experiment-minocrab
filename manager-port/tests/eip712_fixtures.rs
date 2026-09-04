@@ -26,21 +26,17 @@ use minocrab_sim::v3::simulate;
 use minocrab_std::v3::{Bytes, Uint, B32};
 use minocrab_zkir::v3::IrValue;
 
+use manager_port::action_envelope::ExecutePayload;
+use manager_port::byte_codec::b32_const;
 use manager_port::eip712::*;
-use manager_port::payload::ExecutePayload;
-use manager_port::words::b32_const;
 
 // ---- fixture loading ---------------------------------------------------------------------------
 
 fn fixtures() -> serde_json::Value {
     // Vendored at `fixtures/eip712/v1.json` (see the file's provenance note in the README):
     // it is test-vector JSON, not a compiled artifact, and the suite is worthless without it.
-    let path = std::env::var("AA_EIP712_FIXTURES").unwrap_or_else(|_| {
-        format!(
-            "{}/../fixtures/eip712/v1.json",
-            env!("CARGO_MANIFEST_DIR")
-        )
-    });
+    let path = std::env::var("AA_EIP712_FIXTURES")
+        .unwrap_or_else(|_| format!("{}/../fixtures/eip712/v1.json", env!("CARGO_MANIFEST_DIR")));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("reading the frozen fixture set at {path}: {e}"));
     serde_json::from_str(&text).expect("the fixture set parses")
@@ -87,7 +83,9 @@ fn s<'a>(action: &'a serde_json::Value, key: &str, dflt: &'a str) -> &'a str {
 /// includes max-width amounts, so the 16 LE bytes go in directly. The bound holds by construction
 /// (a `u128` is below `2^128`), which is what `from_field_unchecked` is claiming.
 fn uint128_const(c: &mut Circuit3, v: u128) -> Uint<128, Public> {
-    Uint::from_field_unchecked(c.constant(Fr::from_le_bytes(&v.to_le_bytes()).expect("16 bytes fit")))
+    Uint::from_field_unchecked(
+        c.constant(Fr::from_le_bytes(&v.to_le_bytes()).expect("16 bytes fit")),
+    )
 }
 
 const ZERO32: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -103,15 +101,30 @@ fn payload_consts(c: &mut Circuit3, action: &serde_json::Value) -> ExecutePayloa
     let is_swap = selector == 6;
 
     // `color` on withdraw/transfer, `giveColor` on the swap.
-    let primary_color = if is_swap { s(action, "giveColor", ZERO32) } else { s(action, "color", ZERO32) };
-    let primary_amount = if is_swap { s(action, "giveAmount", "0") } else { s(action, "amount", "0") };
+    let primary_color = if is_swap {
+        s(action, "giveColor", ZERO32)
+    } else {
+        s(action, "color", ZERO32)
+    };
+    let primary_amount = if is_swap {
+        s(action, "giveAmount", "0")
+    } else {
+        s(action, "amount", "0")
+    };
 
     ExecutePayload {
         selector: Uint::<8, Public>::constant(c, u64::from(selector)),
         // `authMode` is not part of any EIP-712 struct; it never enters a hash preimage.
         auth_mode: Uint::<8, Public>::constant(c, 1),
         account: b32_const(c, &hex_bytes::<32>(s(action, "accountId", ZERO32))),
-        owner: Bytes::<20, Public>::constant(c, &hex_bytes::<20>(s(action, "owner", "0x0000000000000000000000000000000000000000"))),
+        owner: Bytes::<20, Public>::constant(
+            c,
+            &hex_bytes::<20>(s(
+                action,
+                "owner",
+                "0x0000000000000000000000000000000000000000",
+            )),
+        ),
         account_salt: b32_const(c, &hex_bytes::<32>(s(action, "accountSalt", ZERO32))),
         nonce: Uint::<64, Public>::constant(c, dec_u64(s(action, "nonce", "0"))),
         valid_until: Uint::<64, Public>::constant(c, dec_u64(s(action, "validUntil", "0"))),
@@ -130,15 +143,34 @@ fn payload_consts(c: &mut Circuit3, action: &serde_json::Value) -> ExecutePayloa
 /// `evmStructHashFor`'s selector dispatch, with the type hash chosen off-circuit because the
 /// selector is a constant in this harness. (The in-circuit mux is `custodyDispatch`'s job and is
 /// exercised by Phase 3.4, not here — here the point is the byte recipe per action.)
-fn struct_hash_for(c: &mut Circuit3, manager: &B32<Public>, p: &ExecutePayload<Public>, selector: u8) -> B32<Public> {
+fn struct_hash_for(
+    c: &mut Circuit3,
+    manager: &B32<Public>,
+    p: &ExecutePayload<Public>,
+    selector: u8,
+) -> B32<Public> {
     let pre = match selector {
         1 => struct_hash_preimage_register(c, manager, p),
         2 | 3 => {
-            let t = b32_const(c, if selector == 2 { &WITHDRAW_SHIELDED_TYPE } else { &WITHDRAW_UNSHIELDED_TYPE });
+            let t = b32_const(
+                c,
+                if selector == 2 {
+                    &WITHDRAW_SHIELDED_TYPE
+                } else {
+                    &WITHDRAW_UNSHIELDED_TYPE
+                },
+            );
             struct_hash_preimage_withdraw(c, &t, manager, p)
         }
         4 | 5 => {
-            let t = b32_const(c, if selector == 4 { &TRANSFER_SHIELDED_TYPE } else { &TRANSFER_UNSHIELDED_TYPE });
+            let t = b32_const(
+                c,
+                if selector == 4 {
+                    &TRANSFER_SHIELDED_TYPE
+                } else {
+                    &TRANSFER_UNSHIELDED_TYPE
+                },
+            );
             struct_hash_preimage_transfer(c, &t, manager, p)
         }
         6 => struct_hash_preimage_open_swap(c, manager, p),
@@ -152,7 +184,10 @@ fn struct_hash_for(c: &mut Circuit3, manager: &B32<Public>, p: &ExecutePayload<P
 fn chain_circuit(deployment_domain: [u8; 32], action: serde_json::Value) -> Compiled3 {
     let mut c = Circuit3::new();
     let selector = selector_of(action["primaryType"].as_str().unwrap());
-    let manager = b32_const(&mut c, &hex_bytes::<32>(action["manager"].as_str().expect("manager")));
+    let manager = b32_const(
+        &mut c,
+        &hex_bytes::<32>(action["manager"].as_str().expect("manager")),
+    );
     let domain = b32_const(&mut c, &deployment_domain);
     let p = payload_consts(&mut c, &action);
 
@@ -206,12 +241,23 @@ fn check_case(case: &serde_json::Value, failures: &mut Vec<String>, checked: &mu
     assert_eq!(run.outputs.len(), 3, "{id}: expected three outputs");
 
     let manual = &case["manual"];
-    for (i, field) in ["domainSeparator", "structHash", "digest"].iter().enumerate() {
+    for (i, field) in ["domainSeparator", "structHash", "digest"]
+        .iter()
+        .enumerate()
+    {
         *checked += 1;
         let got = out_bytes(&run.outputs[i]);
-        let want = hex_bytes::<32>(manual[field].as_str().unwrap_or_else(|| panic!("{id}: manual.{field}")));
+        let want = hex_bytes::<32>(
+            manual[field]
+                .as_str()
+                .unwrap_or_else(|| panic!("{id}: manual.{field}")),
+        );
         if got != want {
-            failures.push(format!("{id}/{field}: port {} != frozen {}", hex(&got), hex(&want)));
+            failures.push(format!(
+                "{id}/{field}: port {} != frozen {}",
+                hex(&got),
+                hex(&want)
+            ));
         }
     }
 }
@@ -232,7 +278,10 @@ fn eip712_chain_matches_the_frozen_fixtures() {
     let mut cases = 0usize;
 
     for group in ["boundaryCases", "randomCases"] {
-        for case in f[group].as_array().unwrap_or_else(|| panic!("{group} is an array")) {
+        for case in f[group]
+            .as_array()
+            .unwrap_or_else(|| panic!("{group} is an array"))
+        {
             cases += 1;
             check_case(case, &mut failures, &mut checked);
         }
@@ -271,5 +320,8 @@ fn the_fixture_set_covers_all_six_action_types() {
     .iter()
     .map(|s| s.to_string())
     .collect();
-    assert_eq!(seen, want, "the fixture set no longer covers all six action types");
+    assert_eq!(
+        seen, want,
+        "the fixture set no longer covers all six action types"
+    );
 }

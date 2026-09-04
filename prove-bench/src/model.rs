@@ -105,7 +105,7 @@ pub fn owner_commitment(sk: &[u8; 32]) -> [u8; 32] {
 // ---- the frozen EIP-712 constants ---------------------------------------------------------------
 //
 // Copied byte for byte from `manager-port/src/eip712.rs`, which copied them from
-// `contracts/manager.compact:422-490`. Only the ones selector 1 needs are kept.
+// `contracts/modules/Eip712.compact:55-123`. Only the ones selector 1 needs are kept.
 
 /// `accountTag()` — the `evmAccountIdFor` domain separator.
 pub const ACCOUNT_TAG: [u8; 32] = [
@@ -519,6 +519,20 @@ fn native_auth_reads(reads: &mut Reads) {
     reads.bool(false); //  `evmNonces.member(acct)`
 }
 
+/// THE REGISTRY-TO-CUSTODY SEAM — the two reads `execute` makes for `custodyDispatch`
+/// (`contracts/manager.compact:378-380`), in argument order.
+///
+/// Present on every non-registration selector since the product's module split: `Custody.compact`
+/// holds no registry state, so `accounts.member(p.toAccount)` and `accounts.member(p.creditAccount)`
+/// are read by the caller, unconditionally under `!isRegistration`, and the Booleans are asserted
+/// inside custody at their original positions. Before the split each read sat at its assert's
+/// position and was short-circuited by that assert's guard. The mirror of
+/// `manager-port/tests/execute_differential.rs::seam_registry_reads`.
+fn seam_registry_reads(reads: &mut Reads, to_registered: bool, credit_registered: bool) {
+    reads.bool(to_registered); //     `isRegistered(p.toAccount)`
+    reads.bool(credit_registered); // `isRegistered(p.creditAccount)`
+}
+
 /// The two `assertLiveDeadline` reads: `blockTimeGte(validUntil - 3600)` then
 /// `blockTimeLt(validUntil)` — `false` then `true`.
 fn live_deadline_reads(reads: &mut Reads) {
@@ -533,7 +547,7 @@ pub fn sel0_native_registration() -> Scenario {
     let (r, s, pk) = dummy_signature();
     let mut reads = Reads::new();
     reads.b32(&self_addr()); // `kernel.self()`
-    // `deploymentDomain` is GUARDED OFF for selector 0.
+                             // `deploymentDomain` is GUARDED OFF for selector 0.
     reads.bool(false); // `accounts.member(account)`
     reads.bool(false); // `accountModes.member(account)`
     Scenario {
@@ -602,6 +616,7 @@ pub fn sel2_withdraw_shielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false); // both accounts are `default<Bytes<32>>`
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(true); //  `pools.member(col)`
@@ -638,12 +653,14 @@ pub fn sel3_withdraw_unshielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false); // both accounts are `default<Bytes<32>>`
     reads.bool(true); //   `unshieldedBalances.member(debitKey)` — the muxed family is unshielded
     reads.u128(1_000); //  `unshieldedBalances.lookup(debitKey)`
     reads.bool(false); //  `unshieldedBalance(col) < val` — the contract holds enough
     Scenario {
         name: "sel3-withdraw-unshielded-native",
-        what: "selector 3 — withdraw unshielded, native (User-tagged payout; PR#9 made it provable)",
+        what:
+            "selector 3 — withdraw unshielded, native (User-tagged payout; PR#9 made it provable)",
         payload: Payload {
             selector: 3,
             auth_mode: 0,
@@ -670,7 +687,7 @@ pub fn sel4_transfer_shielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
-    reads.bool(true); //  `accounts.member(p.toAccount)` — reached because `isTransfer` held
+    seam_registry_reads(&mut reads, true, false);
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(false); // `shieldedBalances.member(creditKey)` — a fresh credit cell
@@ -702,7 +719,7 @@ pub fn sel5_transfer_unshielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
-    reads.bool(true); //  `accounts.member(p.toAccount)`
+    seam_registry_reads(&mut reads, true, false);
     reads.bool(true); //  `unshieldedBalances.member(debitKey)`
     reads.u128(1_000); // `unshieldedBalances.lookup(debitKey)`
     reads.bool(false); // `unshieldedBalances.member(creditKey)`
@@ -735,11 +752,11 @@ pub fn sel6_open_swap_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, true);
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(true); //  `pools.member(col)`
     reads.coin(&[9u8; 32], &a_colour(), 5_000, 0); // `pools.lookup(col)`
-    reads.bool(true); //  `accounts.member(p.creditAccount)`
     reads.b32(&self_addr()); // the open leg's `kernel.self()`
     reads.b32(&self_addr()); // the change coin's `insertCoin(… right(kernel.self()))`
     reads.b32(&self_addr()); // `receiveShielded`'s `kernel.self()`

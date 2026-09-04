@@ -102,7 +102,10 @@ fn assert_schema_identity(ours: &IrSource, theirs: &IrSource, what: &str) {
             .collect::<Vec<_>>()
     };
     assert_eq!(types(ours), types(theirs), "{what}: input schemas differ");
-    assert_eq!(ours.outputs, theirs.outputs, "{what}: output schemas differ");
+    assert_eq!(
+        ours.outputs, theirs.outputs,
+        "{what}: output schemas differ"
+    );
     assert_eq!(
         ours.do_communications_commitment, theirs.do_communications_commitment,
         "{what}: communications-commitment flag differs"
@@ -159,7 +162,9 @@ fn assert_pi_identity(ours: &IrSource, theirs: &IrSource, pi: &ProofPreimage, wh
         "{what}: upstream check() disagrees with the simulation on the port"
     );
     assert_eq!(
-        theirs.check(pi).expect("upstream accepts the compactc artifact"),
+        theirs
+            .check(pi)
+            .expect("upstream accepts the compactc artifact"),
         their_run.pi_skips,
         "{what}: upstream check() disagrees with the simulation on the compactc artifact"
     );
@@ -342,7 +347,10 @@ fn pool_has_colour_case(present: bool, name: &'static str) -> Case {
 
 #[test]
 fn pool_has_colour_present() {
-    gate(&pool_has_colour_case(true, "poolHasColour — the pool exists"));
+    gate(&pool_has_colour_case(
+        true,
+        "poolHasColour — the pool exists",
+    ));
 }
 
 #[test]
@@ -564,7 +572,8 @@ fn account_record_refusals_agree() {
             reads,
             outputs: vec![zero(), zero(), zero(), zero()],
         };
-        let (pi, err) = support::synth::synthesize_partial(&theirs("accountRecord"), &case.preimage());
+        let (pi, err) =
+            support::synth::synthesize_partial(&theirs("accountRecord"), &case.preimage());
         assert!(
             err.is_some(),
             "{name}: the compactc artifact ACCEPTED a run the contract's asserts forbid"
@@ -637,8 +646,12 @@ fn deposit_unshielded_adds_to_an_existing_cell() {
 #[test]
 fn deposit_unshielded_refuses_zero() {
     let case = deposit_unshielded_case("depositUnshielded — zero amount", None, 0);
-    let (pi, err) = support::synth::synthesize_partial(&theirs("depositUnshielded"), &case.preimage());
-    assert!(err.is_some(), "the compactc artifact accepted a zero deposit");
+    let (pi, err) =
+        support::synth::synthesize_partial(&theirs("depositUnshielded"), &case.preimage());
+    assert!(
+        err.is_some(),
+        "the compactc artifact accepted a zero deposit"
+    );
     assert!(
         simulate(&ours("depositUnshielded"), &pi).is_err(),
         "the port accepted a zero deposit the compactc artifact refuses"
@@ -693,8 +706,8 @@ fn deposit_shielded_merge() -> Case {
     let mut reads = vec![one()]; // accounts.member
     push_b32(&mut reads, &self_addr()); // receiveShielded's kernel.self()
     reads.push(one()); // pools.member -> the merge arm runs
-    // pools.lookup — six limbs. The pooled coin's COLOUR must equal the deposited coin's, or
-    // `mergeCoinImmediate`'s "Can only merge coins of the same color" assert refuses the run.
+                       // pools.lookup — six limbs. The pooled coin's COLOUR must equal the deposited coin's, or
+                       // `mergeCoinImmediate`'s "Can only merge coins of the same color" assert refuses the run.
     push_b32(&mut reads, &pooled_nonce);
     push_b32(&mut reads, &a_colour());
     reads.push(u128_fr(pooled_value));
@@ -730,7 +743,8 @@ fn deposit_shielded_refuses_a_zero_coin() {
     case.name = "depositShielded — zero-value coin";
     // slot 4 is the coin's value.
     case.inputs[4] = zero();
-    let (pi, err) = support::synth::synthesize_partial(&theirs("depositShielded"), &case.preimage());
+    let (pi, err) =
+        support::synth::synthesize_partial(&theirs("depositShielded"), &case.preimage());
     assert!(
         err.is_some(),
         "the compactc artifact accepted a zero-value deposit"
@@ -753,7 +767,8 @@ fn deposit_shielded_refuses_a_mismatched_pool_colour() {
     let (hi, lo) = b32_slots(&other);
     case.reads[6] = hi;
     case.reads[7] = lo;
-    let (pi, err) = support::synth::synthesize_partial(&theirs("depositShielded"), &case.preimage());
+    let (pi, err) =
+        support::synth::synthesize_partial(&theirs("depositShielded"), &case.preimage());
     assert!(
         err.is_some(),
         "the compactc artifact merged coins of different colours"
