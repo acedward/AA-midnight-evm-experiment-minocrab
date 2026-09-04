@@ -1,7 +1,7 @@
 {
   "note": "The SIZE and SHA-256 of every .zkir `emit-zkir` produces, i.e. the README's expected-hash table in machine form. Compared by scripts/check-port-artifacts.sh; re-record with `--write` ONLY when a byte change is intended and the commit message says which hashes moved and why. Emission is deterministic and needs no compactc, no Docker and no network: the hashes are decided by the `minocrab` rev below and by this crate's source, nothing else.",
   "recordedAt": "2026-09-04",
-  "minocrabRev": "6a53f2b54850955406cd0f45dd78cc1e152182c7",
+  "minocrabRev": "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9",
   "contractPin": {
     "commit": "713a20215f33e02904ea5bd699b7de7f76562e1b",
     "managerCompactSha256": "164cf112dc52ba88f1e16cfbd1e63c3bc6b2831539be12e7de229847dd7025c7"
@@ -18,16 +18,16 @@
       "sha256": "ab6a0afd75d46d3f77a2cfb998b5106004eb90cd5528393ca0d2039bda1b2d59"
     },
     "depositShielded": {
-      "bytes": 14847,
-      "sha256": "16b6912ef08e38abfe33757156d8be91105d11b6a369256624eef9938e36b52f"
+      "bytes": 14927,
+      "sha256": "dd049233d4c6919d3c142c0a6509277d1de46f0b4360248b1b94665f041cc13d"
     },
     "depositUnshielded": {
       "bytes": 4333,
       "sha256": "b228a30b533b29966de36f3c007c270cc2f910c9d8200fa25858709e1025edcb"
     },
     "execute": {
-      "bytes": 124071,
-      "sha256": "aed45e8031e7babc31702adc48154b563176b6395466dc71991a62372cca437f"
+      "bytes": 124332,
+      "sha256": "de0b523298b8280a42e23d3fc837c75c33b426dd14d3ed80cdaf804772f7edc1"
     },
     "hello_positive_amount": {
       "bytes": 314,

@@ -39,7 +39,8 @@
 use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::Public;
 use minocrab_std::v3::{
-    is_true, kernel, not, Bool, CoinRecipient, ContractAddress, Either, Uint, UserAddress, B32,
+    is_true, kernel, not, Bool, CoinColor, CoinNonce, CoinRecipient, ContractAddress, Either, Uint,
+    UserAddress, ZswapCoinPublicKey, B32,
 };
 
 use crate::coins::{
@@ -258,8 +259,13 @@ pub fn custody_dispatch(
                 let zero_b32 = B32 { hi: zero, lo: zero };
                 let rcpt = CoinRecipient {
                     is_left: use_left,
-                    left: B32::cond_select(c, use_left, &p.recipient, &zero_b32),
-                    right: B32::cond_select(c, use_left, &zero_b32, &p.recipient),
+                    left: ZswapCoinPublicKey(B32::cond_select(
+                        c,
+                        use_left,
+                        &p.recipient,
+                        &zero_b32,
+                    )),
+                    right: ContractAddress(B32::cond_select(c, use_left, &zero_b32, &p.recipient)),
                 };
                 // PR#9: the give amount is the CLAMPED one.
                 let result = kernel::send_shielded(c, &pooled.as_qualified(), &rcpt, safe_give);
@@ -294,11 +300,11 @@ pub fn custody_dispatch(
                 })
                 .otherwise(|c| {
                     let change_coin = minocrab_std::v3::ShieldedCoinInfo3 {
-                        nonce: evolve_nonce(c, 2, &pooled.nonce),
-                        color: col,
+                        nonce: CoinNonce(evolve_nonce(c, 2, &pooled.nonce)),
+                        color: CoinColor(col),
                         value: change_value.field(),
                     };
-                    let self_recipient = contract_recipient(c, self_addr);
+                    let self_recipient = contract_recipient(c, self_addr.address());
                     let cm = minocrab_std::v3::coin_commitment(c, &change_coin, &self_recipient);
                     kernel::claim_zswap_coin_spend(c, &cm);
                     kernel::claim_zswap_coin_receive(c, &cm);
@@ -311,7 +317,7 @@ pub fn custody_dispatch(
 
         // --- the unshielded give leg (selector 3) ------------------------------------------------
         c.when(m.is_withdraw_unshielded, |c| {
-            let enough = kernel::unshielded_balance_gte(c, col, val);
+            let enough = kernel::unshielded_balance_gte(c, CoinColor(col), val);
             c.assert(is_true(enough).message("contract unshielded balance too low"));
             // PR#10 / project 00016 — THE RECIPIENT-TAG FIX (`manager.compact:1097-1099`):
             //
@@ -360,8 +366,8 @@ pub fn custody_dispatch(
         // --- the swap WANT leg: claim `wantCoin` into custody ------------------------------------
         c.when(m.is_swap, |c| {
             let want_coin = minocrab_std::v3::ShieldedCoinInfo3 {
-                nonce: p.want_nonce,
-                color: p.want_color,
+                nonce: CoinNonce(p.want_nonce),
+                color: CoinColor(p.want_color),
                 value: p.want_amount.field(),
             };
             receive_shielded(c, &want_coin);

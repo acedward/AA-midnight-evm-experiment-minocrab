@@ -35,8 +35,8 @@
 use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::{Alignment, AlignmentAtom, AlignmentSegment, Public};
 use minocrab_std::v3::{
-    coin_commitment, kernel, CircuitAbi, CoinRecipient, ContractAddress, LedgerMap, LedgerRepr,
-    QualifiedShieldedCoinInfo3, ShieldedCoinInfo3, B32,
+    coin_commitment, kernel, CircuitAbi, CoinColor, CoinNonce, CoinRecipient, ContractAddress,
+    LedgerMap, LedgerRepr, QualifiedShieldedCoinInfo3, ShieldedCoinInfo3, ZswapCoinPublicKey, B32,
 };
 
 use crate::ledger::MANAGER;
@@ -106,8 +106,8 @@ impl PooledCoin {
     /// The same value as minocrab's own coin type, so the kernel gadgets can take it.
     pub fn as_qualified(&self) -> QualifiedShieldedCoinInfo3<Public> {
         QualifiedShieldedCoinInfo3 {
-            nonce: self.nonce,
-            color: self.color,
+            nonce: CoinNonce(self.nonce),
+            color: CoinColor(self.color),
             value: self.value,
             mt_index: self.mt_index,
         }
@@ -117,8 +117,8 @@ impl PooledCoin {
     /// (`manager.compact:754-756`). Zero instructions.
     pub fn downcast(&self) -> ShieldedCoinInfo3<Public> {
         ShieldedCoinInfo3 {
-            nonce: self.nonce,
-            color: self.color,
+            nonce: CoinNonce(self.nonce),
+            color: CoinColor(self.color),
             value: self.value,
         }
     }
@@ -170,8 +170,8 @@ pub fn contract_recipient(c: &mut Circuit3, me: ContractAddress<Public>) -> Coin
     let zero = c.constant(0u64);
     CoinRecipient {
         is_left: zero,
-        left: B32 { hi: zero, lo: zero },
-        right: me.bytes(),
+        left: ZswapCoinPublicKey(B32 { hi: zero, lo: zero }),
+        right: me,
     }
 }
 
@@ -180,7 +180,7 @@ pub fn contract_recipient(c: &mut Circuit3, me: ContractAddress<Public>) -> Coin
 /// artifact's op stream carries a separate `dup 2; idxc [0]; popeqc` before every `insertCoin`.
 pub fn self_recipient(c: &mut Circuit3) -> CoinRecipient<Public> {
     let me = kernel::self_address(c);
-    contract_recipient(c, me)
+    contract_recipient(c, me.address())
 }
 
 // ---- the stdlib recipes -------------------------------------------------------------------------
@@ -251,7 +251,7 @@ pub fn send_unshielded(
     amount: minocrab_std::v3::Uint<128, Public>,
     recipient: &kernel::UnshieldedRecipient<Public>,
 ) {
-    let token = kernel::unshielded(c, color);
+    let token = kernel::unshielded(c, CoinColor(color));
     kernel::inc_unshielded_outputs(c, &token, amount);
     kernel::claim_unshielded_coin_spend(c, &token, recipient, amount);
 
@@ -262,7 +262,7 @@ pub fn send_unshielded(
     let is_left = recipient.is_left.field();
     let zero = c.constant(0u64);
     let me = c
-        .when_value(is_left, |c| kernel::self_address(c))
+        .when_value(is_left, |c| kernel::self_address(c).address())
         .otherwise(|_c| ContractAddress(B32 { hi: zero, lo: zero }))
         .into_inner();
     let left = recipient.left.bytes();

@@ -10,7 +10,7 @@ disclosures, same guard set in the same order, FAB-compatible public-input encod
 change**. MinoCrab's own instruction-selection choices are the only thing allowed to differ — and
 they are the whole point:
 
-> ### `execute` drops from **k = 19 / 382,781 rows** to **k = 18 / 211,056 rows** — −44.86%
+> ### `execute` drops from **k = 19 / 382,781 rows** to **k = 18 / 211,059 rows** — −44.86%
 >
 > Crossing the k = 19 → k = 18 boundary **halves the proving time and halves the proving key**,
 > at an unchanged proof size, public-input count and verifier-key size.
@@ -53,8 +53,8 @@ Every number below was measured at exactly these pins. They are not suggestions.
 
 | thing | pin |
 |---|---|
-| **MinoCrab** | [`sig-net/minocrab`][minocrab] @ `6a53f2b54850955406cd0f45dd78cc1e152182c7` — **unaudited third party** |
-| **Rust** | `cargo` / `rustc` **1.95.0** (`aarch64-apple-darwin`). 1.92 and below are *below* minocrab's floor — `sysinfo@0.39.6` requires 1.95 |
+| **MinoCrab** | [`sig-net/minocrab`][minocrab] @ `1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9` (upstream `main`, 2026-09-02) — **unaudited third party**. Previous pin `6a53f2b54850955406cd0f45dd78cc1e152182c7`; what the move cost is in [§ MinoCrab pin history](#minocrab-pin-history) |
+| **Rust** | `cargo` / `rustc` **1.95.0** (`aarch64-apple-darwin`). 1.92 and below do not build this workspace: `sysinfo@0.39.6` declares `rust-version = "1.95"` and arrives through `midnight-storage`, i.e. through the `midnight-ledger` rev minocrab pins. minocrab's own workspace floor is `rust-version = "1.85"`; 1.95.0 is what the dependency graph actually requires, re-checked at `1522f9d` |
 | **Contract ported** | [`contracts/manager.compact`][contract] @ [`713a20215f33e02904ea5bd699b7de7f76562e1b`][pin] — 1,420 lines, 78,004 B, sha256 `164cf112dc52ba88f1e16cfbd1e63c3bc6b2831539be12e7de229847dd7025c7` |
 | **Reference compiler** | **Compact 0.34.0** / language 0.26.0 / runtime 0.19.0 / `--feature-zkir-v3`, the toolchain the product repository pins on `main`. Obtained and hash-verified by `scripts/toolchain.sh`, which builds `docker/compactc.Dockerfile` from release archive `compactc_v0.34.0_aarch64-unknown-linux-musl.zip` (sha256 `d3e292c4f48e257dcd6b3d3e3e4743d7d8ea0729f48953eab91a366d44cd026d`) — arm64. The verified binaries are `compactc.bin` `628b343f9b0ebe32e6e6a141b6f73cc66edb19c516a4817b478c3b47f74230d5` and `zkir-v3` `6a91308419d24bc0633210897d10c7c1b2193444e8bde09ce763e9556cb8f93a`. See the history note below |
 | **Keygen tool** | `zkir-v3 compile` (`/opt/compactc/zkir-v3`), from that same image |
@@ -106,20 +106,21 @@ baseline artifact and are feature-gated off; see
 
 | artifact | k | rows | prover key | verifier key |
 |---|---:|---:|---:|---:|
-| `compactc` 0.33.0 `execute` @ `713a202` | **19** | 382,781 | 1,141,041,970 B | 3,321 B |
-| **this port's `execute`** | **18** | **211,056** | **570,484,400 B** | 3,321 B |
+| `compactc` `execute` @ `713a202` | **19** | 382,781 | 1,141,041,970 B | 3,321 B |
+| **this port's `execute`** | **18** | **211,059** | **570,484,400 B** | 3,321 B |
 | | | **−44.86%** | **−50.0%** | **±0** |
 
-The k = 18 ceiling is 262,144 rows; this lands at 211,056 — **51,088 rows of headroom**, 80.51% of
-the ceiling. The measurement is triple-derived and all three agree: `zkir-v3 mock-compile` reports
-`(k=18, rows=211056)`; the `zkir-v3 compile` keygen banner reports the same; and upstream's own
-`IrSource::model()` reports k = 18 / 211,056 over 1,441 instructions — against 5,787 instructions
-for the compactc artifact.
+The k = 18 ceiling is 262,144 rows; this lands at 211,059 — **51,085 rows of headroom**, 80.51% of
+the ceiling. The measurement is double-derived here and both agree: `zkir-v3 mock-compile` reports
+`(k=18, rows=211059)`, and upstream's own `IrSource::model()` reports k = 18 / 211,059 over 1,444
+instructions — against 5,787 instructions for the compactc artifact. (The third derivation, the
+`zkir-v3 compile` keygen banner, agreed at the previous pin's 211,056; the keys are not yet
+regenerated at this pin — see the note under § Expected hashes.)
 
 The other eight circuits are **not** where the win is, and **no `k` moves but `execute`'s**. Their
-port-side rows at this snapshot are 42,255 / 7,917 / 4,000 / 4,000 / 332 / 158 / 129 / 129 —
-58,920 in aggregate. Measured against compactc on the immediately preceding snapshot of the same
-contract, those eight went 58,892 → 58,920: **+28 rows, +0.048% — a wash, marginally in MinoCrab's
+port-side rows at this snapshot are 42,256 / 7,917 / 4,000 / 4,000 / 332 / 158 / 129 / 129 —
+58,921 in aggregate. Measured against compactc on the immediately preceding snapshot of the same
+contract, those eight went 58,892 → 58,921: **+29 rows, +0.049% — a wash, marginally in MinoCrab's
 disfavour.** The −44.86% on `execute` comes from replacing per-byte explode/rebuild chains, which
 are 54.3% of `execute`'s instructions and ≈0% of everything else's. Do not transfer the headline
 percentage to another contract without checking that it, too, is byte-chain heavy.
@@ -128,7 +129,12 @@ percentage to another contract without checking that it, too, is byte-chain heav
 
 Measured on an Apple M4 Max (12P + 4E, 48 GiB, macOS 15.7.3 arm64), both artifacts proved through
 the **same** upstream prover on **identical `ProofPreimage`s** that both accept, interleaved A/B
-across two sessions:
+across two sessions.
+
+**These are the MinoCrab `6a53f2b` numbers** (`execute` at 211,056 rows). The current pin's
+`execute` is three rows larger at the same k = 18, and k is what proving time and key size are a
+function of, so the table transfers — but it has not been re-measured, and the row that would move
+is none of them:
 
 | | compactc k = 19 | MinoCrab k = 18 | Δ |
 |---|---:|---:|---:|
@@ -166,6 +172,10 @@ Three things must travel with those numbers:
 Each change set was applied cumulatively to the port, re-emitted, and re-measured with the same
 oracle — measured, not estimated. (The crate was then restored and re-emits `execute.zkir`
 byte-identically, which is what makes the intermediate numbers safe to publish.)
+
+All four rows are MinoCrab `6a53f2b` measurements — the statement's cost, with the compiler held
+still. (At the current pin the same final statement is 211,059; see
+[§ MinoCrab pin history](#minocrab-pin-history) for those +3.)
 
 | cumulative statement | rows | Δ |
 |---|---:|---:|
@@ -206,17 +216,25 @@ intended byte change that the commit message explains.
 
 | file | bytes | SHA-256 |
 |---|---:|---|
-| `execute.zkir` | 124,071 | `aed45e8031e7babc31702adc48154b563176b6395466dc71991a62372cca437f` |
-| `execute.bzkir` | 52,186 | `853ed70bea672dc5b8ee6e176c1c756b130f017ec74bc1472999b0fcb1820fcb` |
-| `execute.prover` | 570,484,400 | `6919a054f2df9ba23b40752d740eaff50bd14c6ebf651445dcdc3e1f335208de` |
-| `execute.verifier` | 3,321 | `6d2b443391faba265407cbe6a0d755844fd6a4bc0fac672a6eb2ebe44bbdd082` |
+| `execute.zkir` | 124,332 | `de0b523298b8280a42e23d3fc837c75c33b426dd14d3ed80cdaf804772f7edc1` |
+| `execute.bzkir` | 52,303 | `ea9b708d9b05926d83ff8cc2de5ed29a3703bc10dd0eff385f319897dd9b030d` |
+
+**The keys are NOT re-recorded yet.** The pair below was generated from the previous pin's
+`execute.zkir` (`aed45e80…`), so it belongs to that ZKIR and not to the one above; the sizes are a
+function of k = 18 alone and do not move, the bytes do. They are kept here as the `6a53f2b` record
+until the pair is regenerated:
+
+| file | bytes | SHA-256 | of which ZKIR |
+|---|---:|---|---|
+| `execute.prover` | 570,484,400 | `6919a054f2df9ba23b40752d740eaff50bd14c6ebf651445dcdc3e1f335208de` | `aed45e80…` (superseded) |
+| `execute.verifier` | 3,321 | `6d2b443391faba265407cbe6a0d755844fd6a4bc0fac672a6eb2ebe44bbdd082` | `aed45e80…` (superseded) |
 
 The other eight circuits (`.bzkir` is what `zkir-v3 mock-compile` writes; no keys were generated
 for these — only `execute` was at k = 19):
 
 | circuit | `.zkir` bytes | `.zkir` SHA-256 | `.bzkir` bytes | `.bzkir` SHA-256 |
 |---|---:|---|---:|---|
-| `depositShielded` | 14,847 | `16b6912ef08e38abfe33757156d8be91105d11b6a369256624eef9938e36b52f` | 5,681 | `39464be643789b64f6860c38ac98fdeb22c222744f86e5e662c362d075db5172` |
+| `depositShielded` | 14,927 | `dd049233d4c6919d3c142c0a6509277d1de46f0b4360248b1b94665f041cc13d` | 5,713 | `1e086e6bb0326b8fa2a5a2e985fa07b8e76b3c6c64ecaeb2da16f7e4e61bbf60` |
 | `depositUnshielded` | 4,333 | `b228a30b533b29966de36f3c007c270cc2f910c9d8200fa25858709e1025edcb` | 1,659 | `50cc264a8b790f7288aa873bb7dbf57d347f09b92792596a7af2026e576cf5b9` |
 | `shieldedAccountBalance` | 1,768 | `2311b13ee29a2101dd62682240135c351cfde4cad2f261cb6602ea28d16a2436` | 612 | `db8fd4e154333f7626dd81a45cc5128a3955a51f0010e008ee14f5ae5a2e5e73` |
 | `unshieldedAccountBalance` | 1,772 | `3f449ff9e79786c831cc5b61454b569426b138e8c81146deba5b633deddd8dd9` | 616 | `6f06a9aab8e5f903e842fff0d9bb0d70099eceb21fc1aee99a3de30de3ad23cf` |
@@ -226,7 +244,9 @@ for these — only `execute` was at k = 19):
 | `poolHasColour` | 792 | `9a92ddc5dd5c85aea5af5d42f5f79801617ff073cd92e0cb1bec92d798497587` | 269 | `dabe9fb2c42a4a08843a1b6b0b09b6220544c06e11c0018289c7126c31619076` |
 
 `emit-zkir` also writes a tenth file, `hello_positive_amount.zkir` — a minimal smoke circuit used
-during bring-up. It is not part of the contract's provable surface and carries no expected hash.
+during bring-up. It is not part of the contract's provable surface, but
+`scripts/check-port-artifacts.sh` gates it like the rest: 314 B,
+`be3bfc7c376b26ef5d5b848a6a0d1650636210176e3cf9c6ffe8ea23bcec91db`.
 
 **If a hash does not match, do not proceed as if it did.** The overwhelmingly likely cause is a
 moved pin — a different minocrab rev, or a different `midnight-ledger` rev pulled in through the
@@ -243,7 +263,7 @@ set, no private image to find.
 ```bash
 # (k, rows) via `zkir-v3 mock-compile` — also writes the .bzkir hashed above
 scripts/measure-zkir.sh generated/port-zkir execute $(scripts/free-port.sh) 1800 port
-#   -> Mock compiling circuit "execute.zkir" (k=18, rows=211056)
+#   -> Mock compiling circuit "execute.zkir" (k=18, rows=211059)
 
 # proving + verifying keys, offline, from the raw ZKIR
 #   put the SRS in generated/zk-params/ first — the container runs --network none and
@@ -262,9 +282,10 @@ artifacts are keyed by the *identical* tool, in the identical image, under ident
 ### Proving and verifying
 
 `prove-bench` loads a `.zkir` plus its key pair through Midnight's own crates and produces real
-proofs. On this snapshot it produced **one verified proof per selector, 7 of 7**, each 10,304 bytes
-over 1,265 public inputs, on preimages synthesized from the *compactc* artifact and accepted
-unchanged by this one:
+proofs. At MinoCrab `6a53f2b` it produced **one verified proof per selector, 7 of 7**, each 10,304
+bytes over 1,265 public inputs, on preimages synthesized from the *compactc* artifact and accepted
+unchanged by this one. That run used the key pair recorded above, which belongs to the superseded
+`execute.zkir`; re-running it at the current pin needs the pair regenerated first:
 
 ```bash
 cargo +1.95.0 build --release --locked -p prove-bench
@@ -341,6 +362,61 @@ measured k = 19 / 382,781 rows, whose nine ZKIR hashes are byte-identical under 
 What this does **not** establish: a formal proof of statement equivalence, or any claim about
 MinoCrab's correctness in general. It is a strong *empirical* gate on **this** circuit against
 **this** reference artifact.
+
+## MinoCrab pin history
+
+### `6a53f2b` → `1522f9d` (2026-09-04): **+4 rows, in two circuits, and nothing else**
+
+81 upstream commits. Everything was re-emitted and all nine circuits re-measured through the same
+`zkir-v3 mock-compile` oracle:
+
+| circuit | `.zkir` bytes | rows | k | Δ rows |
+|---|---:|---:|---:|---:|
+| `execute` | 124,071 → **124,332** | 211,056 → **211,059** | 18 → 18 | **+3** |
+| `depositShielded` | 14,847 → **14,927** | 42,255 → **42,256** | 16 → 16 | **+1** |
+| `depositUnshielded` | 4,333 | 7,917 | 13 | ±0 (byte-identical) |
+| `accountRecord` | 6,065 | 332 | 9 | ±0 (byte-identical) |
+| `poolValue` | 1,632 | 158 | 8 | ±0 (byte-identical) |
+| `shieldedAccountBalance` | 1,768 | 4,000 | 13 | ±0 (byte-identical) |
+| `unshieldedAccountBalance` | 1,772 | 4,000 | 13 | ±0 (byte-identical) |
+| `isRegistered` | 786 | 129 | 8 | ±0 (byte-identical) |
+| `poolHasColour` | 792 | 129 | 8 | ±0 (byte-identical) |
+
+**`execute` stays at k = 18**, with 51,085 rows of headroom, so nothing in the § Proving table
+moves. The whole delta is attributable, instruction for instruction:
+
+* `execute` gains exactly 3 `cond_select` instructions (251 → 254) and `depositShielded` exactly 1
+  (9 → 10). **No other opcode count changes in any circuit**, and each added instruction costs
+  exactly one row.
+* Every `impact` operation is unchanged: 404 in `execute` and 90 in `depositShielded`, identical
+  in order, guard wire and operands once SSA numbering is normalised. The `public_input` count is
+  unchanged too (64 and 18). So the ledger effects, the guard truth values and the public-input
+  vector are the same statement.
+* The added instructions are all the same shape — `cond_select(value, 0, guard)` immediately
+  before a guarded `constrain_bits(128)` — and come from upstream commit `f7580c25` ("one choke
+  point for every guarded effect"). That commit made a range check inside a guarded scope check
+  `select(g, w, 0)` **because that is what compactc itself emits** for a cast inside an `if`. The
+  port is therefore *more* faithful to the reference at this pin, and pays 4 rows for it.
+* The differential suite is green at this pin: **56/56**, including `pi_skips` equality entry by
+  entry over all 404 Impact instructions and element-by-element public-input equality against the
+  `compactc` artifact.
+
+Two upstream API changes had to be absorbed, both type-level and both zero-instruction — which the
+byte-identical output of the other seven circuits demonstrates rather than asserts:
+
+* the newtype sweep (`CoinNonce`, `CoinColor`, `ZswapCoinPublicKey`, `ContractAddress`) and
+  `SelfAddress` (`kernel.self()` as a proof of self, not a value): 21 call sites now wrap or
+  `.address()`-unwrap. Upstream documents the newtypes as "provably zero-instruction and
+  snapshot-neutral" because every impl delegates.
+* the M24 tier boundary (`807b9b19`) moved the simulator VM behind `minocrab-sim`'s `unstable`
+  feature, which the differential harness needs; the dev-dependency now enables it, as upstream's
+  own in-workspace crates do.
+
+What did NOT move: upstream still pins `midnight-ledger` rev `04c9c5d9…`, and its
+`[patch.crates-io]` block is byte-identical to this workspace's, so the port links exactly the same
+upstream code as before. The `Cargo.lock` change is the eight `minocrab-*` packages' rev plus one
+new internal edge (`minocrab-sim` now also depends on `minocrab-ir`) — 397 packages before and
+after, no other version moved.
 
 ## Caveats
 

@@ -35,7 +35,8 @@
 use minocrab::v3::{Circuit3, Compiled3};
 use minocrab::{Private, Public};
 use minocrab_std::v3::{
-    circuit, is_true, kernel, label, CircuitArg, Discloses, Disclose, ShieldedCoinInfo3, Uint, B32,
+    circuit, is_true, kernel, label, CircuitArg, CoinColor, CoinNonce, Discloses, Disclose,
+    ShieldedCoinInfo3, Uint, B32,
 };
 
 use crate::coins::{family_key, receive_shielded, self_recipient, shielded_family_tag, POOLS_READ};
@@ -74,8 +75,8 @@ impl DepositCoin<Public> {
     /// The same value as minocrab's own coin type, so the kernel gadgets can take it.
     fn as_coin(&self) -> ShieldedCoinInfo3<Public> {
         ShieldedCoinInfo3 {
-            nonce: self.nonce,
-            color: self.color,
+            nonce: CoinNonce(self.nonce),
+            color: CoinColor(self.color),
             value: self.value.field(),
         }
     }
@@ -178,7 +179,7 @@ pub fn deposit_unshielded(
     let registered = MANAGER.accounts.member(c, &acct);
     c.assert(is_true(registered).message("credit account is not registered"));
 
-    kernel::receive_unshielded(c, col, amt);
+    kernel::receive_unshielded(c, CoinColor(col), amt);
 
     let tag = crate::coins::unshielded_family_tag(c);
     let key = family_key(c, &acct, &col, &tag);
