@@ -1,4 +1,8 @@
-//! The contract's read-only browser-facing queries (`manager.compact:566-630`).
+//! The contract's read-only browser-facing queries. Since the module split they live with the
+//! state they read: `contracts/modules/AccountRegistry.compact:116-159` (`myAccount`,
+//! `isRegistered`, `accountRecord`), `contracts/modules/ShieldedCustody.compact:116-129`
+//! (`shieldedAccountBalance`, `poolValue`, `poolHasColour`) and
+//! `contracts/modules/UnshieldedCustody.compact:84-86` (`unshieldedAccountBalance`).
 //!
 //! Phase 2 ported [`is_registered`], the smallest provable circuit in the contract (k=8 / 129 rows
 //! under compactc). Phase 4 adds the other five readers: [`pool_has_colour`], [`pool_value`],
@@ -50,7 +54,7 @@ label! {
     Account = "account";
 }
 
-/// `export circuit isRegistered(owner: Bytes<32>): Boolean` (`manager.compact:575-577`)
+/// `export circuit isRegistered(owner: Bytes<32>): Boolean` (`contracts/modules/AccountRegistry.compact:121-123`)
 ///
 /// A faithful port: one disclosure, one `Set.member` read against field 1, the Boolean returned
 /// as the circuit's declared output. No guard, no witness, no arithmetic — which is exactly why
@@ -61,7 +65,7 @@ pub fn is_registered(c: &mut Circuit3, owner: B32<Private>) -> Discloses<(Owner,
     Discloses::of(MANAGER.accounts.member(c, &owner))
 }
 
-/// `export circuit poolHasColour(colour: Bytes<32>): Boolean` (`manager.compact:628-630`)
+/// `export circuit poolHasColour(colour: Bytes<32>): Boolean` (`contracts/modules/ShieldedCustody.compact:127-129`)
 ///
 /// [`is_registered`] against ledger field **0** (`pools`) instead of field 1 (`accounts`) — the
 /// same four instructions, the same shape. It is in the table as its own row because the baseline
@@ -75,7 +79,7 @@ pub fn pool_has_colour(
     Discloses::of(MANAGER.pools.member(c, &colour))
 }
 
-/// `export circuit poolValue(colour: Bytes<32>): Uint<128>` (`manager.compact:623-626`)
+/// `export circuit poolValue(colour: Bytes<32>): Uint<128>` (`contracts/modules/ShieldedCustody.compact:121-124`)
 ///
 /// ```compact
 /// const col = disclose(colour);
@@ -97,7 +101,7 @@ pub fn pool_value(
     Discloses::of(Uint::from_field_unchecked(pooled.or_default().value))
 }
 
-/// `shieldedBalanceOf(acct, colour)` (`manager.compact:335-338`) —
+/// `shieldedBalanceOf(acct, colour)` (`contracts/modules/ShieldedCustody.compact:105-108`) —
 /// `shieldedBalances.member(k) ? shieldedBalances.lookup(k) : 0`, where `k = shieldedKey(acct, colour)`.
 ///
 /// **A MISSING CELL READS AS 0** (FR-204/FR-206) — and that is not re-implemented here, it is the
@@ -126,7 +130,7 @@ pub fn shielded_balance_of(
         .or_default()
 }
 
-/// `unshieldedBalanceOf(acct, colour)` (`manager.compact:340-343`) — the OTHER family, and a
+/// `unshieldedBalanceOf(acct, colour)` (`contracts/modules/UnshieldedCustody.compact:73-76`) — the OTHER family, and a
 /// different constant tag, so the two answer independently for a byte-identical `colour`.
 ///
 /// Top-level only, for the same reason as [`shielded_balance_of`].
@@ -144,7 +148,7 @@ pub fn unshielded_balance_of(
         .or_default()
 }
 
-/// `export circuit shieldedAccountBalance(owner, colour): Uint<128>` (`manager.compact:613-615`)
+/// `export circuit shieldedAccountBalance(owner, colour): Uint<128>` (`contracts/modules/ShieldedCustody.compact:116-118`)
 #[circuit(output = "balance")]
 pub fn shielded_account_balance(
     c: &mut Circuit3,
@@ -156,7 +160,7 @@ pub fn shielded_account_balance(
     Discloses::of(shielded_balance_of(c, &owner, &colour))
 }
 
-/// `export circuit unshieldedAccountBalance(owner, colour): Uint<128>` (`manager.compact:619-621`)
+/// `export circuit unshieldedAccountBalance(owner, colour): Uint<128>` (`contracts/modules/UnshieldedCustody.compact:84-86`)
 #[circuit(output = "balance")]
 pub fn unshielded_account_balance(
     c: &mut Circuit3,
@@ -170,7 +174,7 @@ pub fn unshielded_account_balance(
 
 // ---- accountRecord ------------------------------------------------------------------------------
 
-/// `export struct AccountRecord` (`manager.compact:249-254`) — the only STRUCT RETURN in the
+/// `export struct AccountRecord` (`contracts/modules/AccountRegistry.compact:57-62`) — the only STRUCT RETURN in the
 /// contract's provable surface.
 ///
 /// **Hand-written [`CircuitOut`] and [`Select`], because minocrab has no derive for either.** The
@@ -227,7 +231,7 @@ impl Select<Public> for AccountRecordOut {
     }
 }
 
-/// `export circuit accountRecord(account: Bytes<32>): AccountRecord` (`manager.compact:581-609`)
+/// `export circuit accountRecord(account: Bytes<32>): AccountRecord` (`contracts/modules/AccountRegistry.compact:131-159`)
 ///
 /// ```compact
 /// const acct = disclose(account);
@@ -258,7 +262,7 @@ impl Select<Public> for AccountRecordOut {
 ///
 /// Reads 3 and 5 are the SAME `evmOwners.member(acct)` written twice in the source, once per
 /// branch. Compactc compiles both, under different guards; hoisting it to one read would drop an
-/// `Impact` and fail `pi_skips` — the `manager.compact:872` precedent from Phase 3.
+/// `Impact` and fail `pi_skips` — the `contracts/modules/AccountRegistry.compact:178` precedent from Phase 3.
 #[circuit(output = "record")]
 pub fn account_record(
     c: &mut Circuit3,

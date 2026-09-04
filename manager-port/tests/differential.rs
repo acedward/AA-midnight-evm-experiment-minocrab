@@ -219,8 +219,13 @@ fn preimage_out(inputs: Vec<Fr>, ops: &[VmOp], reads: &[Fr], outputs: &[Fr]) -> 
 
 // ---- isRegistered -----------------------------------------------------------------------------
 
-/// `accounts` is ledger field **1** (declaration order in `manager.compact:262-278`).
-const ACCOUNTS: u8 = 1;
+/// `accounts`' ledger field index — **derived from the port's own ledger block**, not a literal.
+///
+/// It was `1` while the contract was one file and is `0` since the module split (product `main` @
+/// `41de69d`): `AccountRegistry.compact` contributes its four fields ahead of everything else.
+/// Reading it out of [`manager_port::ledger::slot`] means the struct in `src/ledger.rs` is the
+/// single place the number lives, on both the emitting and the checking side of this test.
+const ACCOUNTS: u8 = manager_port::ledger::slot::ACCOUNTS;
 
 /// The transcript of `accounts.member(owner)` answering `answer`.
 fn is_registered_scenario(owner: &[u8; 32], answer: u8) -> ProofPreimage {

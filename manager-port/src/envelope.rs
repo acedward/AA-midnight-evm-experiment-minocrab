@@ -1,5 +1,5 @@
-//! Phase 3.3 — `assertActionEnvelope` (`manager.compact:786-856`) and the account-selection
-//! guards (`:865-899`).
+//! Phase 3.3 — `assertActionEnvelope` (`contracts/modules/ActionEnvelope.compact:80-158`) and the account-selection
+//! guards (`contracts/modules/AccountRegistry.compact:171-207`).
 //!
 //! ## How Compact's early `return`s become guards
 //!
@@ -211,7 +211,7 @@ pub fn assert_action_envelope(c: &mut Circuit3, p: &ExecutePayload<Public>, s: &
     })
 }
 
-/// `authenticatedActionAccount(p, nativeAccount)` (`manager.compact:865-885`).
+/// `authenticatedActionAccount(p, nativeAccount)` (`contracts/modules/AccountRegistry.compact:171-191`).
 ///
 /// Both arms are compiled; each arm's asserts bind only under its own mode, and the returned
 /// account is the `cond_select` of the two. Source order preserved within each arm.
@@ -243,7 +243,7 @@ pub fn authenticated_action_account_effects(
 
             let same = b32_eq(c, native_account, &p.account);
             c.assert(same.message("native witness does not match supplied account transcript"));
-            // A SECOND `accountModes.lookup(acct)` — `manager.compact:872` re-reads the cell rather
+            // A SECOND `accountModes.lookup(acct)` — `contracts/modules/AccountRegistry.compact:178` re-reads the cell rather
             // than reusing `authenticatedNativeAccount`'s, and compactc inlines the call, so the
             // artifact carries two identical lookups (ops 17-20 and 21-24). Reusing the first
             // value here would drop an Impact instruction and fail `pi_skips` equality.
@@ -306,7 +306,7 @@ pub fn authenticated_action_account_effects(
     })
 }
 
-/// `gatewayAccount(p, nativeAccount, evmRegistrationAccount)` (`manager.compact:887-899`).
+/// `gatewayAccount(p, nativeAccount, evmRegistrationAccount)` (`contracts/modules/AccountRegistry.compact:195-207`).
 ///
 /// Selector 0 → the native commitment, selector 1 → the derived EVM registration id, otherwise the
 /// authenticated action account. The action arm's ledger reads run under `is_action`, which is the

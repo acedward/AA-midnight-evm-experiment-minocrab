@@ -27,9 +27,12 @@
 #     * `minocrabRev`      — the eDSL rev that emitted them, read out of the root Cargo.toml and
 #                            re-checked on every run: it is the single most likely cause of a
 #                            mismatch, so the gate names it before you go looking anywhere else.
-#     * `contractPin`      — the product commit and `manager.compact` sha256 whose statement these
-#                            circuits transcribe. Carried forward across a `--write` unless you
-#                            override it, and printed every time so it cannot rot invisibly.
+#     * `contractPin`      — the product commit, the `manager.compact` sha256 and, since the
+#                            product split the contract into a preset plus nine modules, the sha256
+#                            of every module file too: the statement these circuits transcribe is
+#                            all ten files, so pinning only the preset would pin 398 of 1,500 lines.
+#                            Carried forward across a `--write` unless you override it, and printed
+#                            every time so it cannot rot invisibly.
 #     * `toolchain`        — the compactc image ref and the SHA-256 of its `compactc.bin` and
 #                            `zkir-v3`, from scripts/toolchain.sh. These do NOT decide a single byte
 #                            of the port's ZKIR (nothing here is compiled by compactc); they are
@@ -43,6 +46,10 @@
 #   scripts/check-port-artifacts.sh --write            RE-RECORD the fixture from this emission
 #   scripts/check-port-artifacts.sh --write \
 #       --contract-pin <sha> --contract-sha256 <sha>   re-record and move the contract pin with it
+#   scripts/check-port-artifacts.sh --write \
+#       --contract-pin <sha> --contract-dir <path>     …and take every file hash from a checkout
+#                                                      (`<path>` is the product's `contracts/`:
+#                                                      `manager.compact` + `modules/*.compact`)
 #   scripts/check-port-artifacts.sh --no-toolchain-check   skip the Docker toolchain probe
 #
 # `--write` never runs by accident: the gate itself is the no-argument form. Re-record only when a
@@ -62,6 +69,7 @@ zkir_dir=""
 toolchain_check=1
 contract_pin_override=""
 contract_sha_override=""
+contract_dir=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -70,6 +78,7 @@ while [ "$#" -gt 0 ]; do
     --no-toolchain-check)   toolchain_check=0; shift ;;
     --contract-pin)         contract_pin_override="${2:?--contract-pin needs a commit sha}"; shift 2 ;;
     --contract-sha256)      contract_sha_override="${2:?--contract-sha256 needs a sha256}"; shift 2 ;;
+    --contract-dir)         contract_dir="${2:?--contract-dir needs the contracts directory}"; shift 2 ;;
     -h|--help)              sed -n '2,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *)                      echo "unknown argument: $1" >&2; exit 64 ;;
   esac
@@ -98,6 +107,24 @@ if [ "$toolchain_check" -eq 1 ]; then
   zkir_v3_sha256="${TOOLCHAIN_ZKIR_V3_SHA256:-unknown}"
 else
   echo "--no-toolchain-check: the compactc toolchain is not probed (it decides none of the hashes below)"
+fi
+
+# --- the contract files, hashed from a checkout (optional, --write only) -------------------------
+# Typed hashes rot; hashes read out of the tree they describe do not. `--contract-dir` points at the
+# product's `contracts/` directory and every recorded hash below comes from it.
+contract_files=""
+if [ -n "$contract_dir" ]; then
+  contract_dir="$(cd "$contract_dir" && pwd)"
+  echo "CONTRACT_DIR=$contract_dir"
+  # `bash 3.2` (what macOS ships) mis-parses a quoted prefix inside `${var#...}`, so the path is
+  # trimmed with sed rather than with parameter expansion.
+  contract_files="$(
+    { shasum -a 256 "$contract_dir/manager.compact"
+      shasum -a 256 "$contract_dir"/modules/*.compact
+    } | awk '{ h = $1; $1 = ""; sub(/^ +/, ""); print $0 " " h }' \
+      | sed "s|^$contract_dir/||"
+  )"
+  echo "$contract_files" | sed 's/^/  /'
 fi
 
 # --- emit ---------------------------------------------------------------------------------------
@@ -130,6 +157,7 @@ COMPACTC_BIN_SHA256="$compactc_bin_sha256" \
 ZKIR_V3_SHA256="$zkir_v3_sha256" \
 CONTRACT_PIN_OVERRIDE="$contract_pin_override" \
 CONTRACT_SHA_OVERRIDE="$contract_sha_override" \
+CONTRACT_FILES="$contract_files" \
 python3 - <<'PY'
 import datetime, hashlib, json, os, sys
 
@@ -164,6 +192,14 @@ if os.environ["CONTRACT_PIN_OVERRIDE"]:
     contract["commit"] = os.environ["CONTRACT_PIN_OVERRIDE"]
 if os.environ["CONTRACT_SHA_OVERRIDE"]:
     contract["managerCompactSha256"] = os.environ["CONTRACT_SHA_OVERRIDE"]
+if os.environ.get("CONTRACT_FILES", "").strip():
+    files = {}
+    for line in os.environ["CONTRACT_FILES"].strip().split("\n"):
+        rel, digest = line.split()
+        files[rel] = digest
+    contract["files"] = dict(sorted(files.items()))
+    if "manager.compact" in files:
+        contract["managerCompactSha256"] = files["manager.compact"]
 
 if mode == "write":
     doc = {
@@ -196,6 +232,8 @@ if mode == "write":
     print(f"  {len(observed)} circuit(s), minocrab rev {doc['minocrabRev']}")
     print(f"  contract pin {contract.get('commit', '(unset)')} "
           f"manager.compact {contract.get('managerCompactSha256', '(unset)')}")
+    for rel, digest in contract.get("files", {}).items():
+        print(f"    {rel:34} {digest}")
     for n in names:
         print(f"  {n:28} {observed[n]['bytes']:>9} B  {observed[n]['sha256']}")
     sys.exit(0)
@@ -214,6 +252,10 @@ print(f"                observed {obs_rev}  {'==' if rec_rev == obs_rev else '!=
 rec_contract = prev.get("contractPin", {})
 print(f"  contractPin   {rec_contract.get('commit', '(unset)')}  manager.compact "
       f"{rec_contract.get('managerCompactSha256', '(unset)')}")
+rec_files = rec_contract.get("files", {})
+if rec_files:
+    print(f"                {len(rec_files)} contract file(s) hashed; "
+          f"resolve the source-line references against that commit with scripts/check-refs.sh")
 rec_tool = prev.get("toolchain", {})
 print(f"  toolchain     {rec_tool.get('image', '(unset)')}  zkir-v3 {rec_tool.get('zkirV3Sha256', '(unset)')}")
 

@@ -1,4 +1,4 @@
-//! `ExecutePayload` — `execute`'s argument struct (`manager.compact:230-247`).
+//! `ExecutePayload` — `execute`'s argument struct (`contracts/modules/ActionEnvelope.compact:21-38`).
 //!
 //! **Field order is the FAB slot order**, and the compactc artifact pins it: `execute.zkir`
 //! declares `%payload.0` … `%payload.23`, and these sixteen fields flatten to exactly 24 slots

@@ -42,6 +42,10 @@ use midnight_transient_crypto::curve::Fr;
 use midnight_transient_crypto::fab::AlignmentExt;
 use midnight_transient_crypto::repr::FieldRepr;
 
+/// The ledger slot indices, derived from the port's own `#[derive(Ledger)]` block. Imported rather
+/// than re-listed so the state array below follows `src/ledger.rs` by construction.
+use manager_port::ledger::slot;
+
 pub type VmOp = Op<ResultModeVerify, InMemoryDB>;
 
 // ---- Fr helpers ---------------------------------------------------------------------------------
@@ -296,26 +300,33 @@ pub fn assert_round_trip(ops: &[VmOp], transcript: &[Fr]) {
 
 // ---- the pre-state --------------------------------------------------------------------------------
 
-/// The manager's ledger block as real state. Field order is
-/// `contracts/manager.compact:262-278`, which IS the field index — a mis-numbered read fails at
-/// `Popeq` rather than silently reading a neighbour.
+/// The manager's ledger block as real state.
+///
+/// The *state array* this builds is positional, and the position IS the ledger field index — a
+/// mis-numbered read fails at `Popeq` rather than silently reading a neighbour. So [`Self::state`]
+/// does not lay the fields out in the order they are declared below: it places each one at
+/// `manager_port::ledger::slot::<FIELD>`, derived from the port's own ledger block, which is the
+/// same number the emitted `idx` immediates carry. The declaration order here is only the
+/// ergonomic one the scenarios were written against and is deliberately left alone; the split
+/// contract's slot order (`accounts, accountModes, evmOwners, evmNonces, pools, shieldedBalances,
+/// unshieldedBalances, deploymentDomain`) is applied where it matters, in one place.
 #[derive(Clone, Debug, Default)]
 pub struct PreState {
-    /// field 0 — `pools: Map<Bytes<32>, QualifiedShieldedCoinInfo>`.
+    /// `pools: Map<Bytes<32>, QualifiedShieldedCoinInfo>` — slot [`slot::POOLS`].
     pub pools: Vec<([u8; 32], AlignedValue)>,
-    /// field 1 — `accounts: Set<Bytes<32>>` (a map with `Null` values).
+    /// `accounts: Set<Bytes<32>>` (a map with `Null` values) — slot [`slot::ACCOUNTS`].
     pub accounts: Vec<[u8; 32]>,
-    /// field 2 — `shieldedBalances: Map<Bytes<32>, Uint<128>>`.
+    /// `shieldedBalances: Map<Bytes<32>, Uint<128>>` — slot [`slot::SHIELDED_BALANCES`].
     pub shielded_balances: Vec<([u8; 32], u128)>,
-    /// field 3 — `unshieldedBalances: Map<Bytes<32>, Uint<128>>`.
+    /// `unshieldedBalances: Map<Bytes<32>, Uint<128>>` — slot [`slot::UNSHIELDED_BALANCES`].
     pub unshielded_balances: Vec<([u8; 32], u128)>,
-    /// field 4 — `accountModes: Map<Bytes<32>, Uint<8>>`.
+    /// `accountModes: Map<Bytes<32>, Uint<8>>` — slot [`slot::ACCOUNT_MODES`].
     pub account_modes: Vec<([u8; 32], u8)>,
-    /// field 5 — `evmOwners: Map<Bytes<32>, Bytes<20>>`.
+    /// `evmOwners: Map<Bytes<32>, Bytes<20>>` — slot [`slot::EVM_OWNERS`].
     pub evm_owners: Vec<([u8; 32], [u8; 20])>,
-    /// field 6 — `evmNonces: Map<Bytes<32>, Uint<64>>`.
+    /// `evmNonces: Map<Bytes<32>, Uint<64>>` — slot [`slot::EVM_NONCES`].
     pub evm_nonces: Vec<([u8; 32], u64)>,
-    /// field 7 — `deploymentDomain: Bytes<32>`.
+    /// `deploymentDomain: Bytes<32>` — slot [`slot::DEPLOYMENT_DOMAIN`].
     pub deployment_domain: [u8; 32],
     /// NOT a ledger field: the contract's own **kernel** unshielded balance, per colour. It lives
     /// in `CallContext::balance`, not in the contract's state array, and `kernel.unshieldedBalance`
@@ -346,38 +357,84 @@ fn map_of(entries: impl IntoIterator<Item = (AlignedValue, StateValue<InMemoryDB
 }
 
 impl PreState {
+    /// The state array the VM reads, with every field AT ITS LEDGER SLOT.
+    ///
+    /// Each entry is placed by `slot::<FIELD>` rather than by its position in the `vec!` below, so
+    /// the array follows the ledger block in `src/ledger.rs` and cannot fall out of step with the
+    /// `idx` immediates the circuits emit. The `expect` fires only if a slot were declared twice
+    /// or a field were missing — either of which would be a real bug, not a test artefact.
     pub fn state(&self) -> StateValue {
         let key = |k: &[u8; 32]| bytesn(32, k);
-        let fields: Vec<StateValue> = vec![
-            map_of(self.pools.iter().map(|(k, v)| (key(k), cell(v.clone())))),
-            map_of(self.accounts.iter().map(|k| (key(k), StateValue::Null))),
-            map_of(
-                self.shielded_balances
-                    .iter()
-                    .map(|(k, v)| (key(k), cell(bytesn(16, &v.to_le_bytes())))),
+        let placed: Vec<(u8, StateValue)> = vec![
+            (
+                slot::POOLS,
+                map_of(self.pools.iter().map(|(k, v)| (key(k), cell(v.clone())))),
             ),
-            map_of(
-                self.unshielded_balances
-                    .iter()
-                    .map(|(k, v)| (key(k), cell(bytesn(16, &v.to_le_bytes())))),
+            (
+                slot::ACCOUNTS,
+                map_of(self.accounts.iter().map(|k| (key(k), StateValue::Null))),
             ),
-            map_of(
-                self.account_modes
-                    .iter()
-                    .map(|(k, v)| (key(k), cell(bytesn(1, &[*v])))),
+            (
+                slot::SHIELDED_BALANCES,
+                map_of(
+                    self.shielded_balances
+                        .iter()
+                        .map(|(k, v)| (key(k), cell(bytesn(16, &v.to_le_bytes())))),
+                ),
             ),
-            map_of(
-                self.evm_owners
-                    .iter()
-                    .map(|(k, v)| (key(k), cell(bytesn(20, v)))),
+            (
+                slot::UNSHIELDED_BALANCES,
+                map_of(
+                    self.unshielded_balances
+                        .iter()
+                        .map(|(k, v)| (key(k), cell(bytesn(16, &v.to_le_bytes())))),
+                ),
             ),
-            map_of(
-                self.evm_nonces
-                    .iter()
-                    .map(|(k, v)| (key(k), cell(bytesn(8, &v.to_le_bytes())))),
+            (
+                slot::ACCOUNT_MODES,
+                map_of(
+                    self.account_modes
+                        .iter()
+                        .map(|(k, v)| (key(k), cell(bytesn(1, &[*v])))),
+                ),
             ),
-            cell(bytesn(32, &self.deployment_domain)),
+            (
+                slot::EVM_OWNERS,
+                map_of(
+                    self.evm_owners
+                        .iter()
+                        .map(|(k, v)| (key(k), cell(bytesn(20, v)))),
+                ),
+            ),
+            (
+                slot::EVM_NONCES,
+                map_of(
+                    self.evm_nonces
+                        .iter()
+                        .map(|(k, v)| (key(k), cell(bytesn(8, &v.to_le_bytes())))),
+                ),
+            ),
+            (
+                slot::DEPLOYMENT_DOMAIN,
+                cell(bytesn(32, &self.deployment_domain)),
+            ),
         ];
+        let mut fields: Vec<Option<StateValue>> = vec![None; slot::ORDER.len()];
+        for (at, value) in placed {
+            let cellref = fields
+                .get_mut(usize::from(at))
+                .expect("a ledger slot outside the block");
+            assert!(
+                cellref.is_none(),
+                "two ledger fields claim slot {at} — src/ledger.rs and this array disagree"
+            );
+            *cellref = Some(value);
+        }
+        let fields: Vec<StateValue> = fields
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| v.unwrap_or_else(|| panic!("ledger slot {i} ({}) unset", slot::ORDER[i])))
+            .collect();
         StateValue::Array(Array::from(fields))
     }
 }

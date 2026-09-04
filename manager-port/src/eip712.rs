@@ -1,5 +1,5 @@
 //! Phase 3.2 — the AUTH-EIP712-AA-V3-V1 chain: `evmAccountIdFor`, `evmDomainSeparatorFor`,
-//! `evmStructHashFor`, `evmDigestFor` (`manager.compact:422-564`).
+//! `evmStructHashFor`, `evmDigestFor` (`contracts/modules/Eip712.compact:55-207`).
 //!
 //! **These bytes are FROZEN.** They are what a MetaMask signature commits to, so a single wrong
 //! byte silently invalidates every signature the deployed contract would accept. The gate is
@@ -39,7 +39,7 @@ fn words(count: usize) -> Alignment {
     Alignment((0..count).map(|_| atom(32)).collect())
 }
 
-// ---- the frozen constants (`manager.compact:422-490`) -----------------------------------------
+// ---- the frozen constants (`contracts/modules/Eip712.compact:55-123`) -----------------------------------------
 //
 // Byte-for-byte from the contract. Each is a keccak type hash or a hashed domain field, computed
 // off-circuit once and frozen; the contract hard-codes them and so does this port.
@@ -118,7 +118,7 @@ fn b32_from_public<V: Vis3>(b: B32<Public>) -> B32<V> {
     B32 { hi: V::from_public(b.hi), lo: V::from_public(b.lo) }
 }
 
-/// `evmAccountIdFor(manager, owner, salt)` (`manager.compact:502-507`).
+/// `evmAccountIdFor(manager, owner, salt)` (`contracts/modules/Eip712.compact:139-144`).
 ///
 /// `keccak256(accountTag ‖ manager ‖ addressWord(owner) ‖ salt)` — four 32-byte words.
 pub fn evm_account_id_for<V: Vis3>(
@@ -140,7 +140,7 @@ pub fn evm_account_id_for<V: Vis3>(
     })
 }
 
-/// `evmDomainSeparatorFor(manager, domain)` (`manager.compact:509-515`).
+/// `evmDomainSeparatorFor(manager, domain)` (`contracts/modules/Eip712.compact:148-154`).
 ///
 /// The manager's 32 bytes are first hashed and truncated to a 20-byte EVM **alias**
 /// (`slice<20>(keccak256(manager), 12)` — the low 20 bytes of the digest, EVM address convention),
@@ -190,7 +190,7 @@ fn manager_alias_word<V: Vis3>(c: &mut Circuit3, manager: &B32<V>) -> B32<V> {
     B32 { hi: digest.hi, lo }
 }
 
-/// `eip712Digest(domainSeparator, structHash)` (`manager.compact:553-556`).
+/// `eip712Digest(domainSeparator, structHash)` (`contracts/modules/Eip712.compact:194-197`).
 ///
 /// `keccak256(0x19 ‖ 0x01 ‖ domainSeparator ‖ structHash)` — a 2-byte prefix atom then two
 /// 32-byte words, 66 bytes total.
@@ -212,7 +212,7 @@ pub fn eip712_digest<V: Vis3>(
     })
 }
 
-/// The per-selector struct-hash preimages of `evmStructHashFor` (`manager.compact:517-551`).
+/// The per-selector struct-hash preimages of `evmStructHashFor` (`contracts/modules/Eip712.compact:158-192`).
 ///
 /// Returned as `(alignment_word_count, limbs)` so the caller can hash them; each is a sequence of
 /// 32-byte words, matching the Compact source's `Bytes<192>` / `Bytes<320>` / `Bytes<288>` /

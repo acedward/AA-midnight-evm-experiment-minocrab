@@ -26,11 +26,16 @@
 //!
 //! The fix is a second *view* of the same field: [`PooledCoin`] is a local struct with the identical
 //! FAB shape, [`PooledCoin`] implements `LedgerRepr` (a foreign trait on a LOCAL type — allowed),
-//! and [`POOLS_READ`] is `LedgerMap::at(0)` over it. Same field index, same key type, same atoms, so
-//! the emitted `dup 0; idx [0]; idx {key}; popeq` is byte-identical to what a native `lookup` would
-//! emit; the only thing that changed is which Rust type names the popeq's limbs. The atoms are taken
-//! from `QualifiedShieldedCoinInfo3`'s own `CircuitAbi` impl rather than re-listed, so the two views
-//! cannot drift.
+//! and [`POOLS_READ`] is `LedgerMap::at(ledger::slot::POOLS)` over it. Same field index, same key
+//! type, same atoms, so the emitted `dup 0; idx [POOLS]; idx {key}; popeq` is byte-identical to
+//! what a native `lookup` would emit; the only thing that changed is which Rust type names the
+//! popeq's limbs. The atoms are taken from `QualifiedShieldedCoinInfo3`'s own `CircuitAbi` impl
+//! rather than re-listed, so the two views cannot drift.
+//!
+//! The index is TAKEN FROM the ledger block, never written here. It used to be the literal `0`,
+//! and the product's module split moved `pools` to slot 4 — a second handle carrying its own copy
+//! of a slot number is exactly how a reorder silently retargets half a circuit, so this one now
+//! derives it. `the_read_view_is_the_same_field_as_the_write_view` pins the two together.
 
 use minocrab::v3::{Circuit3, FieldT, Wire3};
 use minocrab::{Alignment, AlignmentAtom, AlignmentSegment, Public};
@@ -43,12 +48,16 @@ use crate::ledger::MANAGER;
 
 // ---- the family tags and the family-scoped keys -------------------------------------------------
 
-/// `shieldedFamilyTag()` — `pad(32, "aa:manager:shielded:v1")` (`manager.compact:317-319`).
+/// `_familyTag()` — `pad(32, "aa:manager:shielded:v1")` (`contracts/modules/ShieldedCustody.compact:95-97`).
+///
+/// It was `shieldedFamilyTag` while the contract was one file; the split gave each family module
+/// the same private name, and `Custody.compact` disambiguates them with a renaming import.
 pub fn shielded_family_tag(c: &mut Circuit3) -> B32<Public> {
     B32::pad(c, "aa:manager:shielded:v1")
 }
 
-/// `unshieldedFamilyTag()` — `pad(32, "aa:manager:unshielded:v1")` (`manager.compact:321-323`).
+/// `_familyTag()` — `pad(32, "aa:manager:unshielded:v1")` (`contracts/modules/UnshieldedCustody.compact:63-65`),
+/// the unshielded family's half of the pair above.
 pub fn unshielded_family_tag(c: &mut Circuit3) -> B32<Public> {
     B32::pad(c, "aa:manager:unshielded:v1")
 }
@@ -64,7 +73,9 @@ fn three_words() -> Alignment {
 }
 
 /// `persistentHash<Vector<3, Bytes<32>>>([acct, colour, tag])` — the body of `shieldedKey`,
-/// `unshieldedKey` and the mux's one key derivation (`manager.compact:325-331`, `:1034-1035`).
+/// `unshieldedKey` and the mux's one key derivation
+/// (`contracts/modules/ShieldedCustody.compact:99-101`,
+/// `contracts/modules/UnshieldedCustody.compact:67-69`, `contracts/modules/Custody.compact:250-251`).
 pub fn family_key(
     c: &mut Circuit3,
     acct: &B32<Public>,
@@ -114,7 +125,7 @@ impl PooledCoin {
     }
 
     /// `dropMerkleIndex(coin)` — the stdlib's private `downcastQualifiedCoin`
-    /// (`manager.compact:754-756`). Zero instructions.
+    /// (`contracts/modules/ZswapPrimitives.compact:79-81`). Zero instructions.
     pub fn downcast(&self) -> ShieldedCoinInfo3<Public> {
         ShieldedCoinInfo3 {
             nonce: CoinNonce(self.nonce),
@@ -157,10 +168,30 @@ impl LedgerRepr for PooledCoin {
     }
 }
 
-/// The READ view of ledger field 0 (`pools`). Same field, same key type, different Rust value type
+/// The READ view of the `pools` ledger field. Same field, same key type, different Rust value type
 /// — see the module docs. Writes still go through [`MANAGER.pools`](crate::ledger::Manager::pools),
 /// whose `insert_coin` is the one method that needs minocrab's own coin type.
-pub const POOLS_READ: LedgerMap<B32<Public>, PooledCoin> = LedgerMap::at(0);
+///
+/// The slot comes from [`crate::ledger::slot::POOLS`], so this view and the write view are the
+/// same field by construction rather than by two matching literals.
+pub const POOLS_READ: LedgerMap<B32<Public>, PooledCoin> = LedgerMap::at(crate::ledger::slot::POOLS);
+
+/// The read view and the write view name the SAME ledger field.
+///
+/// They are two handles over one slot, so a hard-coded index in either would be a silent
+/// retarget of every pooled-coin read. This is the check that made the `41de69d` re-target's
+/// `pools` move (slot 0 → 4) impossible to miss: before the slot was derived, the read view still
+/// pointed at slot 0 — which by then held `accounts` — and the differential suite caught it as
+/// `idx [0x00]` where compactc emits `idx [0x04]`.
+#[test]
+fn the_read_view_is_the_same_field_as_the_write_view() {
+    assert_eq!(
+        POOLS_READ.index(),
+        crate::ledger::MANAGER.pools.index(),
+        "the pooled-coin READ view is not the ledger's `pools` field"
+    );
+    assert_eq!(POOLS_READ.index(), crate::ledger::slot::POOLS);
+}
 
 // ---- coin recipients ----------------------------------------------------------------------------
 
@@ -203,7 +234,7 @@ pub fn receive_shielded(c: &mut Circuit3, coin: &ShieldedCoinInfo3<Public>) {
     })
 }
 
-/// `repoolOrRemove(col, change)` (`manager.compact:773-780`) — write back what is left of colour
+/// `repoolOrRemove(col, change)` (`contracts/modules/ShieldedCustody.compact:144-151`) — write back what is left of colour
 /// `col`'s pool after a debit, or drop the colour entirely.
 ///
 /// ```text

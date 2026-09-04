@@ -1,5 +1,6 @@
 //! Phase 4 — the two credit paths: `depositShielded` and `depositUnshielded`
-//! (`manager.compact:642-694`).
+//! (the preset's public wrappers `contracts/manager.compact:288-290` and `:299-301`, over the
+//! composer's `contracts/modules/Custody.compact:100-111` and `:120-134`).
 //!
 //! These are the only circuits besides `execute` that WRITE ledger state and touch the zswap /
 //! unshielded kernel, so they are the only Phase-4 rows whose scenarios need the transcript model
@@ -21,7 +22,7 @@
 //! (`depositUnshielded.zkir:44` and `:46`; `depositShielded.zkir:150` and `:152`). Hoisting it to
 //! one hash would be a statement-preserving optimization **compactc did not take**, so it is not
 //! this port's to take either (FR-003: faithful, same structure); the same precedent as
-//! `manager.compact:872`'s double `accountModes.lookup` in `execute`. It costs rows on both sides
+//! `contracts/modules/AccountRegistry.compact:178`'s double `accountModes.lookup` in `execute`. It costs rows on both sides
 //! equally, which is precisely why leaving it in keeps the comparison honest.
 //!
 //! ## `receiveShielded` is a recipe, not a primitive
@@ -83,7 +84,7 @@ impl DepositCoin<Public> {
 }
 
 /// `export circuit depositShielded(coin: ShieldedCoinInfo, account: Bytes<32>): []`
-/// (`manager.compact:642-671`)
+/// (`contracts/modules/Custody.compact:100-111`)
 ///
 /// ```compact
 /// const c = disclose(coin);
@@ -153,7 +154,7 @@ pub fn deposit_shielded(
 }
 
 /// `export circuit depositUnshielded(colour: Bytes<32>, amount: Uint<128>, account: Bytes<32>): []`
-/// (`manager.compact:681-694`)
+/// (`contracts/modules/Custody.compact:120-134`)
 ///
 /// ```compact
 /// const col = disclose(colour); const amt = disclose(amount); const acct = disclose(account);

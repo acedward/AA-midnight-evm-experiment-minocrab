@@ -1,5 +1,7 @@
 //! Phase 3.3 — the envelope asserts, the deadline, the account identity and the registration
-//! guards (`manager.compact:292-354`, `:786-899`).
+//! guards (`contracts/modules/AccountRegistry.compact:85-109`,
+//! `contracts/modules/ActionEnvelope.compact:80-158`,
+//! `contracts/modules/AccountRegistry.compact:171-207`).
 //!
 //! **Guard ORDER and the refusal set are the product's behaviour** (FR-204), so this module keeps
 //! both: every assert appears in the same relative order as the Compact source and carries the
@@ -52,7 +54,7 @@ pub fn wire_is_true<V: Vis3>(w: Wire3<FieldT, V>) -> Check<V> {
     is_true(Bool::from_field_unchecked(w))
 }
 
-/// `ownerCommitment(sk)` (`manager.compact:292-294`) —
+/// `ownerCommitment(sk)` (`contracts/modules/AccountRegistry.compact:85-87`) —
 /// `persistentCommit<Bytes<21>>("aa:manager:owner:v1.0", disclose(sk))`.
 ///
 /// **`persistentCommit` has no v3 spelling in minocrab** (it is v2-only, `minocrab-std/src/hash.rs:43`),
@@ -88,7 +90,7 @@ pub fn owner_commitment<V: Vis3>(c: &mut Circuit3, sk: &B32<V>) -> B32<V> {
     })
 }
 
-/// `authenticatedNativeAccount(acct)` (`manager.compact:298-303`) — THE single authorization choke
+/// `authenticatedNativeAccount(acct)` (`contracts/modules/AccountRegistry.compact:92-97`) — THE single authorization choke
 /// point for every native debiting action. Three asserts, in source order.
 ///
 /// Runs under whatever ambient guard the caller's `c.when` scope established.
@@ -110,7 +112,7 @@ pub fn authenticated_native_account(
     mode
 }
 
-/// `registerAccount(acct, mode)` (`manager.compact:348-354`) — the shared collision gateway.
+/// `registerAccount(acct, mode)` (`contracts/modules/AccountRegistry.compact:103-109`) — the shared collision gateway.
 /// Three asserts then two inserts, in source order. Runs under the caller's ambient guard.
 pub fn register_account(
     c: &mut Circuit3,
@@ -134,7 +136,7 @@ pub fn register_account(
     MANAGER.account_modes.insert(c, acct, &mode);
 }
 
-/// `assertLiveDeadline(validUntil)` (`manager.compact:858-863`). `execute` calls it inside
+/// `assertLiveDeadline(validUntil)` (`contracts/manager.compact:310-327`). `execute` calls it inside
 /// `if (isEvmAuthorized)`, so the caller opens that scope and this body inherits it.
 ///
 /// Three asserts in source order: the horizon is representable, the deadline is not further out

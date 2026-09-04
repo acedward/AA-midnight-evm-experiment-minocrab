@@ -1,4 +1,4 @@
-//! Phase 3.6 — `export circuit execute(payload, sig, pk): []` (`manager.compact:1314-1381`),
+//! Phase 3.6 — `export circuit execute(payload, sig, pk): []` (`contracts/manager.compact:340-398`),
 //! the contract's only externally callable registration/debit gateway and 86.7% of its provable
 //! rows.
 //!
@@ -113,7 +113,7 @@ fn body(
     // `const signer = disclose(secp256k1EthereumAddress(pk));`
     //
     // The ECDSA operations stay STRAIGHT-LINE, which the contract's own comment says is forced:
-    // "the pinned ZKIR-v3 backend cannot lower guarded secp operations" (`manager.compact:1313`).
+    // "the pinned ZKIR-v3 backend cannot lower guarded secp operations" (`contracts/manager.compact:336`).
     let signature_ok = c.region("ecdsa: verify", |c| {
         let ok = secp256k1_ecdsa_verify(c, &digest.private(), &sig, pk);
         c.disclose(ok, "signatureOk")
@@ -198,10 +198,20 @@ fn body(
         MANAGER.evm_owners.insert(c, &account, &p.owner);
     });
 
-    // `if (!isRegistration) { custodyDispatch(p, account); }`
+    // `if (!isRegistration) {
+    //    custodyDispatch(p, account, isRegistered(p.toAccount), isRegistered(p.creditAccount)); }`
+    //
+    // THE REGISTRY-TO-CUSTODY SEAM (product `41de69d`, `contracts/manager.compact:378-380`). The
+    // two membership facts custody needs are read HERE, because `Custody.compact` holds no registry
+    // state, and passed down as arguments. They are evaluated in argument order — `toAccount`
+    // first, `creditAccount` second — unconditionally under this block's `!isRegistration` guard,
+    // where before the split each was read inside `custodyDispatch` behind the guard of the assert
+    // that consumed it. See [`custody_dispatch`] for the whole story.
     let not_registration = c.not(is_registration);
     c.when(not_registration, |c| {
-        custody_dispatch(c, &p, &s, &account);
+        let to_registered = MANAGER.accounts.member(c, &p.to_account);
+        let credit_registered = MANAGER.accounts.member(c, &p.credit_account);
+        custody_dispatch(c, &p, &s, &account, to_registered, credit_registered);
     });
 
     // The sole checked nonce write, deliberately after custody dispatch.
@@ -258,7 +268,7 @@ fn disclose_payload(c: &mut Circuit3, p: ExecutePayload<Private>) -> ExecutePayl
     }
 }
 
-/// `evmDigestFor(manager, domain, payload)` (`manager.compact:558-564`) —
+/// `evmDigestFor(manager, domain, payload)` (`contracts/modules/Eip712.compact:201-207`) —
 /// `eip712Digest(evmDomainSeparatorFor(manager, domain), evmStructHashFor(manager, payload))`.
 fn evm_digest_for(
     c: &mut Circuit3,
@@ -271,7 +281,7 @@ fn evm_digest_for(
     eip712_digest(c, &sep, &sh)
 }
 
-/// `evmStructHashFor(manager, payload)` (`manager.compact:517-551`).
+/// `evmStructHashFor(manager, payload)` (`contracts/modules/Eip712.compact:158-192`).
 ///
 /// A chain of `if (…) { return keccak(…); }` blocks: a circuit compiles every arm, so all four
 /// preimages are hashed and the answer is selected. The trailing

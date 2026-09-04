@@ -301,9 +301,28 @@ fn native_auth_reads(reads: &mut Reads) {
     reads.bool(true); // `accounts.member(nativeAccount)`
     reads.bool(true); // `accountModes.member(nativeAccount)`
     reads.u8(0); //     `accountModes.lookup(acct)`  — `== 0`, native mode
-    reads.u8(0); //     `accountModes.lookup(acct)`  — re-read at manager.compact:872
+    reads.u8(0); //     `accountModes.lookup(acct)`  — re-read at contracts/modules/AccountRegistry.compact:178
     reads.bool(false); // `evmOwners.member(acct)`
     reads.bool(false); // `evmNonces.member(acct)` — reached because `!evmOwners.member` held
+}
+
+/// THE REGISTRY-TO-CUSTODY SEAM — the two reads `execute` makes for `custodyDispatch`
+/// (`contracts/manager.compact:378-380`), in argument order.
+///
+/// These belong to EVERY non-registration selector since the product's module split. Before it,
+/// `custodyDispatch` read the set itself and each read was short-circuited by the guard of the
+/// assert that consumed it, so `accounts.member(p.toAccount)` appeared only under `isTransfer` and
+/// `accounts.member(p.creditAccount)` only under `isSwap` — and each sat at the assert's position
+/// in the stream, not here. `Custody.compact` holds no registry state, so both are now read by the
+/// caller, unconditionally under `!isRegistration`, before anything custody does. That move is the
+/// whole of the compactc-side `382,781 → 382,780` delta.
+///
+/// The two answers are the membership of `p.toAccount` and `p.creditAccount`, whatever the selector
+/// does with them: a withdrawal leaves both at `default<Bytes<32>>`, which is not a registered
+/// account, so it reads `false` twice and asserts on neither.
+fn seam_registry_reads(reads: &mut Reads, to_registered: bool, credit_registered: bool) {
+    reads.bool(to_registered); //     `isRegistered(p.toAccount)`
+    reads.bool(credit_registered); // `isRegistered(p.creditAccount)`
 }
 
 /// Selector 3 — withdraw unshielded, native authorization.
@@ -314,6 +333,7 @@ fn withdraw_unshielded_native() -> Scenario {
     reads.b32(&self_addr()); //         `kernel.self()`
     reads.b32(&deployment_domain()); // `deploymentDomain` — selector != 0
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false); // both accounts are `default<Bytes<32>>`
     reads.bool(true); //   `unshieldedBalances.member(debitKey)` — the muxed family is unshielded
     reads.u128(1_000); //  `unshieldedBalances.lookup(debitKey)`
     reads.bool(false); //  `unshieldedBalance(col) < val` — the contract holds enough
@@ -349,6 +369,7 @@ fn withdraw_shielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false); // both accounts are `default<Bytes<32>>`
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(true); //  `pools.member(col)`
@@ -385,7 +406,8 @@ fn transfer_shielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
-    reads.bool(true); //  `accounts.member(p.toAccount)` — reached because `isTransfer` held
+    // `p.toAccount` is registered; `p.creditAccount` is unused by a transfer and stays default.
+    seam_registry_reads(&mut reads, true, false);
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(false); // `shieldedBalances.member(creditKey)` — a fresh credit cell
@@ -416,7 +438,7 @@ fn transfer_unshielded_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
-    reads.bool(true); //  `accounts.member(p.toAccount)`
+    seam_registry_reads(&mut reads, true, false);
     reads.bool(true); //  `unshieldedBalances.member(debitKey)`
     reads.u128(1_000); // `unshieldedBalances.lookup(debitKey)`
     reads.bool(false); // `unshieldedBalances.member(creditKey)`
@@ -455,11 +477,12 @@ fn open_swap_native() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    // A swap uses `p.creditAccount`, which is registered; `p.toAccount` stays default.
+    seam_registry_reads(&mut reads, false, true);
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(true); //  `pools.member(col)`
     reads.coin(&[9u8; 32], &a_colour(), 5_000, 0); // `pools.lookup(col)`
-    reads.bool(true); //  `accounts.member(p.creditAccount)` — reached because `isSwap` held
     reads.b32(&self_addr()); // the open leg's `kernel.self()`
     reads.b32(&self_addr()); // the change coin's `insertCoin(… right(kernel.self()))`
     reads.b32(&self_addr()); // `receiveShielded`'s `kernel.self()`
@@ -777,6 +800,7 @@ fn withdraw_shielded_evm() -> Scenario {
     reads.bytes20(&owner); // `evmOwners.lookup(p.account)`
     reads.u64(5); //       `evmNonces.lookup(p.account)`
     live_deadline_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false); // both accounts are `default<Bytes<32>>`
     reads.bool(true); //  `shieldedBalances.member(debitKey)`
     reads.u128(1_000); // `shieldedBalances.lookup(debitKey)`
     reads.bool(true); //  `pools.member(col)`
@@ -836,11 +860,11 @@ fn open_swap_merging() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, true);
     reads.bool(true);
     reads.u128(1_000);
     reads.bool(true);
     reads.coin(&[9u8; 32], &a_colour(), 5_000, 0);
-    reads.bool(true); //     `accounts.member(p.creditAccount)`
     reads.b32(&self_addr()); // the open leg's `kernel.self()`
     reads.b32(&self_addr()); // the change coin's `insertCoin`
     reads.b32(&self_addr()); // `receiveShielded`'s `kernel.self()`
@@ -881,11 +905,11 @@ fn named_swap() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, true);
     reads.bool(true);
     reads.u128(1_000);
     reads.bool(true);
     reads.coin(&[9u8; 32], &a_colour(), 5_000, 0);
-    reads.bool(true); //     `accounts.member(p.creditAccount)`
     reads.b32(&self_addr()); // `sendShielded`'s `kernel.self()` — the NAMED arm this time
     reads.b32(&self_addr()); // `repoolOrRemove`'s `insertCoin`
     reads.b32(&self_addr()); // `receiveShielded`'s `kernel.self()`
@@ -926,6 +950,7 @@ fn withdraw_shielded_emptying_the_pool() -> Scenario {
     reads.b32(&self_addr());
     reads.b32(&deployment_domain());
     native_auth_reads(&mut reads);
+    seam_registry_reads(&mut reads, false, false);
     reads.bool(true);
     reads.u128(1_000);
     reads.bool(true);
@@ -984,11 +1009,15 @@ fn execute_withdraw_shielded_emptying_the_pool() {
 
 use support::replay;
 
-/// Field indices, from the ledger block's declaration order.
-const F_ACCOUNTS: usize = 1;
-const F_ACCOUNT_MODES: usize = 4;
-const F_EVM_OWNERS: usize = 5;
-const F_EVM_NONCES: usize = 6;
+/// Field indices, **derived from the port's own ledger block** (`manager_port::ledger::slot`)
+/// rather than written out, so the module split's renumbering reached them by rebuilding.
+const F_ACCOUNTS: usize = manager_port::ledger::slot::ACCOUNTS as usize;
+const F_ACCOUNT_MODES: usize = manager_port::ledger::slot::ACCOUNT_MODES as usize;
+const F_EVM_OWNERS: usize = manager_port::ledger::slot::EVM_OWNERS as usize;
+const F_EVM_NONCES: usize = manager_port::ledger::slot::EVM_NONCES as usize;
+const F_POOLS: usize = manager_port::ledger::slot::POOLS as usize;
+const F_SHIELDED_BALANCES: usize = manager_port::ledger::slot::SHIELDED_BALANCES as usize;
+const F_UNSHIELDED_BALANCES: usize = manager_port::ledger::slot::UNSHIELDED_BALANCES as usize;
 
 /// Decode the accepted run's transcript, check it re-encodes exactly, and run it.
 fn replay_accepted(
@@ -1111,11 +1140,11 @@ fn replay_withdraw_shielded_emptying_the_pool() {
     let out = replay_accepted(&sc, &pre, 0);
 
     assert!(
-        !replay::map_member(&out.post, 0, &a_colour()),
+        !replay::map_member(&out.post, F_POOLS, &a_colour()),
         "the colour must leave `pools` entirely when the pooled coin is fully spent"
     );
     assert_eq!(
-        replay::map_get_uint(&out.post, 2, &debit_key),
+        replay::map_get_uint(&out.post, F_SHIELDED_BALANCES, &debit_key),
         Some(900),
         "the per-(account, colour) cell must be debited by the withdrawn amount"
     );
@@ -1179,7 +1208,7 @@ fn replay_withdraw_unshielded_native() {
     let out = replay_accepted(&sc, &pre, 0);
 
     assert_eq!(
-        replay::map_get_uint(&out.post, 3, &debit_key),
+        replay::map_get_uint(&out.post, F_UNSHIELDED_BALANCES, &debit_key),
         Some(900),
         "the per-(account, colour) unshielded cell must be debited by the withdrawn amount"
     );

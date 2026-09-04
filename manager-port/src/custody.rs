@@ -1,4 +1,4 @@
-//! Phase 3.4 — `custodyDispatch` (`manager.compact:1001-1135`), the o2 custody mux: one debit leg,
+//! Phase 3.4 — `custodyDispatch` (`contracts/modules/Custody.compact:213-353`), the o2 custody mux: one debit leg,
 //! one credit leg, muxed arguments, for all five custody selectors (2..6).
 //!
 //! ## What this port is required to preserve, and how it does it
@@ -29,7 +29,8 @@
 //!
 //! ## The `member ? lookup : 0` idiom
 //!
-//! `shieldedBalanceAt`/`unshieldedBalanceAt` are `member(k) ? lookup(k) : 0`. compactc lowers that
+//! The two families' `_balanceAt` (named `shieldedBalanceAt` / `unshieldedBalanceAt` before the
+//! module split) are `member(k) ? lookup(k) : 0`. compactc lowers that
 //! to a `member` under the ambient guard and a `lookup` under `ambient && member`, whose
 //! `public_input` gates yield the type default when the guard is off. That is exactly
 //! `LedgerMap::lookup_guarded`, and the resulting zero means "the guard was off", which here is the
@@ -63,7 +64,7 @@ fn as_uint128(c: &mut Circuit3, w: Wire3<FieldT, Public>) -> Uint<128, Public> {
     Uint::from_field_unchecked(c.copy(w))
 }
 
-/// `shieldedBalances.member(k) ? shieldedBalances.lookup(k) : 0` (`manager.compact:953-955`).
+/// `shieldedBalances.member(k) ? shieldedBalances.lookup(k) : 0` (`contracts/modules/ShieldedCustody.compact:133-135`).
 fn shielded_balance_at(c: &mut Circuit3, k: &B32<Public>) -> Uint<128, Public> {
     let present = MANAGER.shielded_balances.member(c, k);
     // A SCOPE, not `lookup_guarded(c, present, …)`: see F-00012-07 in the module docs. The
@@ -74,7 +75,7 @@ fn shielded_balance_at(c: &mut Circuit3, k: &B32<Public>) -> Uint<128, Public> {
         .into_inner()
 }
 
-/// `unshieldedBalances.member(k) ? unshieldedBalances.lookup(k) : 0` (`manager.compact:957-959`).
+/// `unshieldedBalances.member(k) ? unshieldedBalances.lookup(k) : 0` (`contracts/modules/UnshieldedCustody.compact:90-92`).
 fn unshielded_balance_at(c: &mut Circuit3, k: &B32<Public>) -> Uint<128, Public> {
     let present = MANAGER.unshielded_balances.member(c, k);
     c.when_value(present.field(), |c| MANAGER.unshielded_balances.lookup(c, k))
@@ -82,7 +83,7 @@ fn unshielded_balance_at(c: &mut Circuit3, k: &B32<Public>) -> Uint<128, Public>
         .into_inner()
 }
 
-/// The muxed selector algebra of `manager.compact:1003-1020`.
+/// The muxed selector algebra of `contracts/modules/Custody.compact:219-236`.
 struct Mux {
     is_withdraw_shielded: Wire3<FieldT, Public>,
     is_withdraw_unshielded: Wire3<FieldT, Public>,
@@ -117,16 +118,36 @@ impl Mux {
     }
 }
 
-/// `custodyDispatch(p, account)` — the whole custody dispatch for selectors 2..6, with one copy of
-/// every expensive operation.
+/// `custodyDispatch(p, account, toRegistered, creditRegistered)` — the whole custody dispatch for
+/// selectors 2..6, with one copy of every expensive operation
+/// (`contracts/modules/Custody.compact:213-353`).
 ///
 /// The caller wraps this in `c.when(!isRegistration, …)`, which is where `execute` calls it from
-/// (`manager.compact:1352-1355`); every operation below therefore inherits that ambient guard.
+/// (`contracts/manager.compact:378-380`); every operation below therefore inherits that ambient guard.
+///
+/// ## THE REGISTRY-TO-CUSTODY SEAM (product `41de69d`)
+///
+/// `to_registered` and `credit_registered` are `accounts.member(p.toAccount)` and
+/// `accounts.member(p.creditAccount)`, **read by the caller and passed in**. Before the product's
+/// module split this circuit read the set itself, each read short-circuited by the guard of the
+/// assert that consumed it (`isTransfer`, `isSwap`). `Custody.compact` holds no registry state and
+/// a Compact module never resolves caller identity, so the split hoisted both reads into
+/// `manager.compact`'s `execute`, where they are evaluated as ARGUMENTS — unconditionally under the
+/// ambient `!isRegistration` — and asserted here, at the original positions, with the original
+/// messages.
+///
+/// That is a real change to the read schedule, not a rename: the two `member` ops move earlier in
+/// the transcript and lose their inner guards. It is also the whole of the compactc-side
+/// `382,781 → 382,780` delta the product recorded for `execute`. The port follows it because the
+/// port transcribes the contract; the differential suite is what proves the two streams still
+/// agree instruction for instruction.
 pub fn custody_dispatch(
     c: &mut Circuit3,
     p: &crate::payload::ExecutePayload<Public>,
     s: &Selectors,
     account: &B32<Public>,
+    to_registered: Bool<Public>,
+    credit_registered: Bool<Public>,
 ) {
     c.region("custody dispatch", |c| {
         let m = Mux::of(c, s);
@@ -160,15 +181,13 @@ pub fn custody_dispatch(
         );
 
         // --- 1. internal-transfer destination checks (selectors 4/5), in their product order -----
-        // SHORT-CIRCUIT: the `accounts.member` read only happens under `isTransfer`.
-        let dest_registered = c
-            .when_value(m.is_transfer, |c| MANAGER.accounts.member(c, &p.to_account))
-            .otherwise(|c| Bool::constant(c, false))
-            .into_inner();
+        // THE SEAM: `toRegistered` arrives as an argument (`Custody.compact:244`), so there is no
+        // read to short-circuit here any more. `Check::or` over an already-computed Boolean is
+        // exactly what compactc emits for `!isTransfer || toRegistered`.
         let not_transfer = not(is_true(Bool::from_field_unchecked(m.is_transfer)));
         c.assert(
             not_transfer
-                .or(is_true(dest_registered))
+                .or(is_true(to_registered))
                 .message("destination account is not registered"),
         );
         let not_transfer = not(is_true(Bool::from_field_unchecked(m.is_transfer)));
@@ -211,7 +230,7 @@ pub fn custody_dispatch(
                     .message("pooled colour balance too low"),
             );
 
-            // PR#9 / project 00013 — THE POOL-UNDERFLOW FIX (`manager.compact:1064`).
+            // PR#9 / project 00013 — THE POOL-UNDERFLOW FIX (`contracts/modules/Custody.compact:279`).
             //
             //     const safeGive = (pooled.value >= val ? val : 0) as Uint<128>;
             //
@@ -235,11 +254,8 @@ pub fn custody_dispatch(
             ));
 
             // --- 4. the swap credit target, at its product position: after the pool guard --------
-            // SHORT-CIRCUIT again: the read is guarded by `isSwap`.
-            let credit_registered = c
-                .when_value(m.is_swap, |c| MANAGER.accounts.member(c, &p.credit_account))
-                .otherwise(|c| Bool::constant(c, false))
-                .into_inner();
+            // THE SEAM again: `creditRegistered` was read by the caller
+            // (`Custody.compact:282`), so only the assert is left here.
             let not_swap = not(is_true(Bool::from_field_unchecked(m.is_swap)));
             c.assert(
                 not_swap
@@ -319,7 +335,7 @@ pub fn custody_dispatch(
         c.when(m.is_withdraw_unshielded, |c| {
             let enough = kernel::unshielded_balance_gte(c, CoinColor(col), val);
             c.assert(is_true(enough).message("contract unshielded balance too low"));
-            // PR#10 / project 00016 — THE RECIPIENT-TAG FIX (`manager.compact:1097-1099`):
+            // PR#10 / project 00016 — THE RECIPIENT-TAG FIX (`contracts/modules/Custody.compact:313-315`):
             //
             //     sendUnshielded(col, val, p.recipientKind == 0
             //       ? right<ContractAddress, UserAddress>(UserAddress{ bytes: p.recipient })

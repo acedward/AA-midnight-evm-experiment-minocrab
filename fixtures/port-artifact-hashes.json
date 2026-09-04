@@ -3,8 +3,20 @@
   "recordedAt": "2026-09-04",
   "minocrabRev": "1522f9dd024d2d9941a6fdcda1ad8f88ab7533b9",
   "contractPin": {
-    "commit": "713a20215f33e02904ea5bd699b7de7f76562e1b",
-    "managerCompactSha256": "164cf112dc52ba88f1e16cfbd1e63c3bc6b2831539be12e7de229847dd7025c7"
+    "commit": "41de69ded41ff933fe0db8697b264dc46fc6e0cb",
+    "managerCompactSha256": "8e063ccfafbcda3cfaed572c00cce9c9436a958f1a7b5de23a3d7e37976a69b5",
+    "files": {
+      "manager.compact": "8e063ccfafbcda3cfaed572c00cce9c9436a958f1a7b5de23a3d7e37976a69b5",
+      "modules/AccountRegistry.compact": "5930a7fe58ef141734989d8a1e7bc93077d239afbc3c3b2635fd2405363fe67c",
+      "modules/ActionEnvelope.compact": "258135d5a5a7d19488dbe501db4631e65817d97813118e0e781b11e67f8e774b",
+      "modules/ByteCodec.compact": "e38dc28ac5600298a150cbceca5b9832b46c3c0824219d834853665bf1444ebe",
+      "modules/Custody.compact": "8186a3ad4454883c8820c26115c6dfc03541b08f04097bac1319b7cdd2dc6d70",
+      "modules/Eip712.compact": "b7ed601f3911f6f380945d16430ae2ea484d9687bf0cee214c1d747ce83fe031",
+      "modules/SemanticCommitment.compact": "d6a5228ebe4afdceea1e25559a3272c85776b6dc60e9fecdb18e1072454acebb",
+      "modules/ShieldedCustody.compact": "266fc8108b0ea6fdb30749951e68ad25ba3568da910999d8e235d650d05dd538",
+      "modules/UnshieldedCustody.compact": "e25bb7e7f9e74821030f40b0fcfd7dfe1b7814278dcd4cb344002ebfbccbe15c",
+      "modules/ZswapPrimitives.compact": "a4bea887671e5088fa74ab589daff43aa35fca6c352361699ce194dad00af49b"
+    }
   },
   "toolchain": {
     "note": "Recorded for the reader, NOT load-bearing for the hashes: nothing in this repository is compiled by compactc. This is the toolchain the README's reference (compactc baseline) and key numbers were measured with.",
@@ -15,19 +27,19 @@
   "circuits": {
     "accountRecord": {
       "bytes": 6065,
-      "sha256": "ab6a0afd75d46d3f77a2cfb998b5106004eb90cd5528393ca0d2039bda1b2d59"
+      "sha256": "2530fca640e76a817c234b84ba4144fe5f2341fcda319e1af3a5c16ce3977ffa"
     },
     "depositShielded": {
       "bytes": 14927,
-      "sha256": "dd049233d4c6919d3c142c0a6509277d1de46f0b4360248b1b94665f041cc13d"
+      "sha256": "eada91aa306819d4dfd0395b2efb03d882131f33d42f1b8ed34a984e76859cd8"
     },
     "depositUnshielded": {
       "bytes": 4333,
-      "sha256": "b228a30b533b29966de36f3c007c270cc2f910c9d8200fa25858709e1025edcb"
+      "sha256": "29ba8b53bbe4bc233f41f3ab5371c13a11a5698f587554f89b298bedc764ea53"
     },
     "execute": {
-      "bytes": 124332,
-      "sha256": "de0b523298b8280a42e23d3fc837c75c33b426dd14d3ed80cdaf804772f7edc1"
+      "bytes": 123635,
+      "sha256": "50f09e0b36bb8cf34e6db52fbbff46a4d94746dd4fc10895e8c770c4f26298c0"
     },
     "hello_positive_amount": {
       "bytes": 314,
@@ -35,23 +47,23 @@
     },
     "isRegistered": {
       "bytes": 786,
-      "sha256": "a6da7f83589283327789ae7a91bb5585efc6e73d69ce1bf48ba568e58a5c3ae3"
+      "sha256": "25eaf82d9391232e00ce0c15e95cbaf004f7acb59d82827c7429be08328bcb0f"
     },
     "poolHasColour": {
       "bytes": 792,
-      "sha256": "9a92ddc5dd5c85aea5af5d42f5f79801617ff073cd92e0cb1bec92d798497587"
+      "sha256": "55c30b8add242f7093c2e40e2124d02a9f4f3a9d19259736ab142a3ebd7d0709"
     },
     "poolValue": {
       "bytes": 1632,
-      "sha256": "17868ae25867ac78f159961f52c253ffbb3de8e6f289bb0632bd815d396c3699"
+      "sha256": "9aeab69ad730f80f747e0fedd5a5301be0e8b7367db6f99af47275366a40dad3"
     },
     "shieldedAccountBalance": {
       "bytes": 1768,
-      "sha256": "2311b13ee29a2101dd62682240135c351cfde4cad2f261cb6602ea28d16a2436"
+      "sha256": "132a4afceb81c656d34493c9806a42bb321fe0373341b1bf5bbd4e85c110abdb"
     },
     "unshieldedAccountBalance": {
       "bytes": 1772,
-      "sha256": "3f449ff9e79786c831cc5b61454b569426b138e8c81146deba5b633deddd8dd9"
+      "sha256": "e609149de5161522555677b777ba82717d71c5bb0e96afab8acf4c68f214e982"
     }
   }
 }
