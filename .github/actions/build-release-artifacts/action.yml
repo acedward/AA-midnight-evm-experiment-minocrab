@@ -1,0 +1,147 @@
+# The build half of `.github/workflows/release.yml`, factored out so the dry-run job and the
+# publish job can share it VERBATIM.
+#
+# WHY THIS IS A COMPOSITE ACTION AND NOT JUST A JOB
+#   `gh release create` needs `contents: write`, and a `workflow_dispatch` dry run must not hold a
+#   write token it has no use for. `permissions:` is per JOB and does not accept expressions — you
+#   cannot write `contents: ${{ ... && 'write' || 'read' }}` — so "write only on the tag path" means
+#   two jobs with different `permissions:` blocks. Two jobs that each need these eight steps would
+#   mean maintaining them twice, and the day they drifted, the dry run would stop being a dry run OF
+#   the release. Hence one action, called twice. Please do not "simplify" this back into a single job
+#   with `contents: write`.
+#
+# WHAT IT DOES NOT DO: fetch the SRS. `scripts/release-artifacts.sh` does that itself, against
+# `fixtures/srs-hashes.json`, because a consumer running the script on a laptop needs the same
+# fetch-and-verify and a second copy of it here would be a second thing to keep true.
+
+name: Build the release artifacts
+description: >
+  Obtain the pinned Compact toolchain, build the port, and run
+  scripts/release-artifacts.sh to produce every file a release publishes.
+
+inputs:
+  tag:
+    description: The tag to record in manifest.json. `unreleased` for a dry run.
+    required: false
+    default: unreleased
+  out:
+    description: Directory the assets are written to.
+    required: false
+    default: generated/release
+
+runs:
+  using: composite
+  steps:
+    # RUST 1.95.0 IS A FLOOR, not a preference: `sysinfo@0.39.6` declares `rust-version = "1.95"`
+    # and arrives through the `midnight-ledger` rev that `minocrab` pins. Installed with `rustup`
+    # rather than a third-party action, matching `ci.yml` — one fewer thing to trust in the path
+    # that produces key material.
+    - name: Install the pinned Rust toolchain
+      shell: bash
+      run: |
+        rustup toolchain install 1.95.0 --profile minimal
+        rustup default 1.95.0
+        cargo --version
+        rustc --version
+        python3 --version
+
+    - name: Cache cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          ~/.cargo/git/checkouts
+          target
+        key: release-cargo-${{ runner.os }}-${{ runner.arch }}-1.95.0-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          release-cargo-${{ runner.os }}-${{ runner.arch }}-1.95.0-
+
+    # `zkir-v3` inside the pinned archive is a STATIC ELF built for aarch64-linux-musl, so on an
+    # arm64 Linux runner it runs with no image and no container — which is the whole reason this
+    # workflow needs neither Docker nor `docker run` privileges. The URL and the SHA-256 come out of
+    # `scripts/toolchain.sh` (which reads them from `docker/compactc.Dockerfile`, the pin of
+    # record), so there is exactly one place either can be changed.
+    - name: Obtain the pinned compactc archive and put zkir-v3 on PATH
+      shell: bash
+      run: |
+        set -euo pipefail
+        . scripts/toolchain.sh
+        echo "archive: $COMPACTC_ARCHIVE_URL"
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/compactc.zip" "$COMPACTC_ARCHIVE_URL"
+        echo "$COMPACTC_ARCHIVE_SHA256  $RUNNER_TEMP/compactc.zip" | sha256sum -c -
+        mkdir -p "$RUNNER_TEMP/compactc"
+        unzip -q -o "$RUNNER_TEMP/compactc.zip" -d "$RUNNER_TEMP/compactc"
+        chmod +x "$RUNNER_TEMP/compactc/zkir-v3"
+        # Verified here as well as inside the release script: a mismatch should stop the run before
+        # 60 seconds of keygen, not after.
+        verify_zkir_v3 "$RUNNER_TEMP/compactc/zkir-v3"
+        "$RUNNER_TEMP/compactc/zkir-v3" --version
+        echo "$RUNNER_TEMP/compactc" >> "$GITHUB_PATH"
+
+    - name: Build
+      shell: bash
+      run: cargo build --release --locked
+
+    # The cheap gate, before the expensive one: if the emitted IR is not what the record says, no
+    # amount of keygen will make the release correct. `release-artifacts.sh` checks this too; here it
+    # costs seconds and names the problem on its own line.
+    - name: Artifact gate (emitted ZKIR hashes)
+      shell: bash
+      run: scripts/check-port-artifacts.sh --no-toolchain-check
+
+    # THE RELEASE ITSELF. Every gate is inside the script, including the one that matters most: the
+    # recorded prover/verifier hashes must reproduce exactly, or this step fails and nothing is
+    # published. Keygen is ~62 s in total on this runner class, dominated by `execute` at k=18
+    # (~54 s, and it needs 4 GiB — it is OOM-killed at 3 GiB, so no memory bound is imposed here).
+    - name: Produce the release assets
+      shell: bash
+      run: scripts/release-artifacts.sh --out "${{ inputs.out }}" --tag "${{ inputs.tag }}"
+
+    - name: Check SHA256SUMS against the files it describes
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "${{ inputs.out }}"
+        sha256sum -c SHA256SUMS
+        echo "files: $(find . -maxdepth 1 -type f | wc -l)"
+        du -sh .
+
+    # `SHA256SUMS` and `manifest.json` in the job summary, so a dry run is READABLE without
+    # downloading anything, and a published release's page can be compared against the run that
+    # produced it.
+    - name: Publish SHA256SUMS and manifest.json to the job summary
+      shell: bash
+      run: |
+        {
+          echo "## \`${{ inputs.tag }}\` — SHA256SUMS"
+          echo '```'
+          cat "${{ inputs.out }}/SHA256SUMS"
+          echo '```'
+          echo "## \`${{ inputs.tag }}\` — manifest.json"
+          echo '```json'
+          cat "${{ inputs.out }}/manifest.json"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Generate the release body from manifest.json
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 scripts/release-notes.py "${{ inputs.out }}/manifest.json" \
+          > "$RUNNER_TEMP/release-notes.md"
+        echo "RELEASE_NOTES=$RUNNER_TEMP/release-notes.md" >> "$GITHUB_ENV"
+        cat "$RUNNER_TEMP/release-notes.md"
+
+    # The two small files only — 13 KB, not 664 MB. The point of keeping them is that a dry run
+    # leaves behind something a human can diff against the next run; the keys themselves are
+    # reproducible from the commit and are not worth the storage.
+    - name: Upload SHA256SUMS and manifest.json as a run artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-hashes-${{ inputs.tag }}
+        path: |
+          ${{ inputs.out }}/SHA256SUMS
+          ${{ inputs.out }}/manifest.json
+        if-no-files-found: error
